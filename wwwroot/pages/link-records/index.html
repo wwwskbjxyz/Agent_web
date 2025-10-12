@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>卡密获取链接详情</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
+    :root { --primary:#6c5ce7; --secondary:#00F0FF; --dark:#0b1220; --darker:#0a0f1a; }
+    body { background:#0b1220; color:#d1d5db; }
+    .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(108,92,231,0.3); }
+    .form-input { background:#0a0f1a; border:1px solid rgba(108,92,231,.3); border-radius:.5rem; padding:.5rem .75rem; width:100%; }
+    .table-header { background: rgba(255,255,255,0.05); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 0.6rem 0.75rem; font-size: 0.875rem; }
+    tbody tr:hover { background: rgba(255,255,255,0.04); }
+    .tag { padding: .15rem .5rem; border-radius:.375rem; font-size:.75rem; }
+    .tag-success { background:rgba(16,185,129,.15); color:#34d399; }
+    .tag-danger { background:rgba(248,113,113,.18); color:#f87171; }
+    .btn-primary { background: var(--primary); color: #fff; transition: opacity .2s ease; }
+    .btn-primary:hover { opacity: .9; }
+    button, input, select { min-height: 40px; }
+    .pagination-btn { padding: .35rem .75rem; border-radius:.375rem; background: rgba(255,255,255,0.05); }
+    .pagination-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .hidden { display:none; }
+    .desktop-only { display: initial; }
+    .mobile-only { display: none !important; }
+    .mobile-hidden-cell { }
+    .mobile-detail-cell { display: none; }
+    .mobile-detail-btn { width: 100%; font-weight: 500; letter-spacing: 0.02em; }
+    .mobile-detail-backdrop { opacity: 0; visibility: hidden; transition: opacity .2s ease, visibility .2s ease; }
+    .mobile-detail-backdrop.active { opacity: 1; visibility: visible; }
+    .mobile-detail-modal-content { width: min(100%, 480px); max-height: 90vh; overflow-y: auto; transform: translateY(24px); transition: transform .2s ease; }
+    .mobile-detail-backdrop.active .mobile-detail-modal-content { transform: translateY(0); }
+    .mobile-detail-content { display: flex; flex-direction: column; gap: 0.75rem; }
+    .mobile-detail-item { background: rgba(15,23,42,.72); border: 1px solid rgba(148,163,184,.15); border-radius: 0.85rem; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem; }
+    .mobile-detail-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .08em; color: rgba(148,163,184,0.85); }
+    .mobile-detail-value { font-size: 0.95rem; color: #e2e8f0; word-break: break-word; }
+    .mobile-detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+
+    @media (min-width: 961px) {
+      .mobile-only { display: none !important; }
+    }
+
+    @media (max-width: 960px) {
+      body { font-size: 15px; }
+      .desktop-only { display: none !important; }
+      .mobile-only { display: block !important; }
+      table { width: 100%; }
+      th, td { white-space: normal; word-break: break-word; }
+      .mobile-hidden-cell { display: none !important; }
+      .mobile-detail-cell { display: table-cell; width: 1%; }
+      .mobile-detail-btn { font-size: 0.85rem; padding: 0.45rem 0.75rem; }
+    }
+
+    @media (max-width: 640px) {
+      .mobile-detail-modal-content { border-radius: 1.25rem; padding: 1.25rem; }
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="toast" class="fixed top-4 right-4 glass px-4 py-3 rounded-lg z-50 transform translate-x-full transition-transform duration-300 flex items-center gap-2 max-w-xs">
+    <i id="toast-icon" class="fa fa-check-circle text-green-400"></i>
+    <span id="toast-message">操作成功</span>
+  </div>
+
+  <div class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-semibold text-white flex items-center gap-2"><i class="fa fa-database text-[var(--secondary)]"></i>卡密获取链接详情</h1>
+        <p class="text-sm text-gray-400">仅超级权限账户可访问，支持查询蓝奏链接、验证日志及可疑卡密。</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="back-btn" class="px-3 py-2 glass rounded-lg"><i class="fa fa-arrow-left mr-1"></i>返回面板</button>
+        <button id="logout-btn" class="px-3 py-2 glass rounded-lg"><i class="fa fa-sign-out-alt mr-1"></i>退出</button>
+      </div>
+    </div>
+
+    <section class="glass rounded-2xl p-5 space-y-4">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-semibold text-white flex items-center gap-2"><i class="fa fa-link text-[var(--secondary)]"></i>蓝奏链接列表</h2>
+          <p class="text-sm text-gray-400">支持关键字模糊搜索与批量删除。</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2 w-full md:w-auto">
+          <input id="lanzou-keyword" type="text" class="form-input" placeholder="关键字（URL 或提取码）">
+          <button id="lanzou-search" class="px-3 py-2 btn-primary rounded-lg">查询</button>
+          <button id="lanzou-reset" class="px-3 py-2 glass rounded-lg">重置</button>
+          <button id="lanzou-delete" class="px-3 py-2 glass rounded-lg text-red-300">删除选中</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table data-mobile-table data-mobile-primary="0,1,3" data-mobile-actions="6" data-mobile-title-col="2" data-mobile-detail-label="详情">
+          <thead class="table-header">
+            <tr>
+              <th class="w-10"><input id="lanzou-select-all" type="checkbox"></th>
+              <th class="text-left">ID</th>
+              <th class="text-left">下载链接</th>
+              <th class="text-left">提取码</th>
+              <th class="text-left">创建时间</th>
+              <th class="text-left">原始内容</th>
+              <th class="text-left">操作</th>
+            </tr>
+          </thead>
+          <tbody id="lanzou-table-body">
+            <tr><td colspan="7" class="text-center text-gray-400 py-6">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-sm text-gray-400">
+        <div id="lanzou-page-info">--</div>
+        <div class="flex items-center gap-2">
+          <button id="lanzou-prev" class="pagination-btn">上一页</button>
+          <button id="lanzou-next" class="pagination-btn">下一页</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass rounded-2xl p-5 space-y-4">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-semibold text-white flex items-center gap-2"><i class="fa fa-clipboard-list text-[var(--secondary)]"></i>验证日志</h2>
+          <p class="text-sm text-gray-400">记录每次链接获取尝试，支持多条件搜索与删除。</p>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-[repeat(5,minmax(0,1fr))] gap-2 w-full">
+          <input id="log-card-key" type="text" class="form-input" placeholder="卡密">
+          <input id="log-ip" type="text" class="form-input" placeholder="IP 地址">
+          <input id="log-keyword" type="text" class="form-input" placeholder="链接/提取码关键字">
+          <select id="log-success" class="form-input">
+            <option value="all">全部状态</option>
+            <option value="success">仅成功</option>
+            <option value="failed">仅失败</option>
+          </select>
+          <div class="flex gap-2">
+            <button id="log-search" class="px-3 py-2 btn-primary rounded-lg flex-1">查询</button>
+            <button id="log-reset" class="px-3 py-2 glass rounded-lg flex-1">重置</button>
+          </div>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table data-mobile-table data-mobile-primary="0,2,5" data-mobile-actions="10" data-mobile-title-col="2" data-mobile-detail-label="详情">
+          <thead class="table-header">
+            <tr>
+              <th class="w-10"><input id="log-select-all" type="checkbox"></th>
+              <th class="text-left">ID</th>
+              <th class="text-left">卡密</th>
+              <th class="text-left">IP 地址</th>
+              <th class="text-left">尝试序号</th>
+              <th class="text-left">结果</th>
+              <th class="text-left">链接 ID</th>
+              <th class="text-left">下载链接</th>
+              <th class="text-left">提取码</th>
+              <th class="text-left">记录时间</th>
+              <th class="text-left">操作</th>
+            </tr>
+          </thead>
+          <tbody id="log-table-body">
+            <tr><td colspan="11" class="text-center text-gray-400 py-6">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-sm text-gray-400">
+        <div class="flex items-center gap-2">
+          <button id="log-delete" class="px-3 py-2 glass rounded-lg text-red-300">删除选中</button>
+          <span id="log-page-info">--</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="log-prev" class="pagination-btn">上一页</button>
+          <button id="log-next" class="pagination-btn">下一页</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass rounded-2xl p-5 space-y-4">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-semibold text-white flex items中心 gap-2"><i class="fa fa-exclamation-triangle text-[var(--secondary)]"></i>可疑卡密记录</h2>
+          <p class="text-sm text-gray-400">统计超过指定次数仍未激活的卡密，以便人工复核。</p>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto">
+          <label class="flex flex-col gap-1 text-sm text-gray-300">
+            <span>最小成功次数</span>
+            <input id="suspicious-min-count" type="number" class="form-input" value="3" min="1">
+          </label>
+          <label class="flex flex-col gap-1 text-sm text-gray-300">
+            <span>距上次获取小时</span>
+            <input id="suspicious-hours" type="number" class="form-input" value="2" min="1" step="0.5">
+          </label>
+          <div class="flex gap-2">
+            <button id="suspicious-refresh" class="px-3 py-2 btn-primary rounded-lg flex-1">刷新</button>
+            <button id="suspicious-reset" class="px-3 py-2 glass rounded-lg flex-1">重置</button>
+          </div>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table data-mobile-table data-mobile-primary="0,1" data-mobile-title-col="0" data-mobile-detail-label="详情">
+          <thead class="table-header">
+            <tr>
+              <th class="text-left">卡密</th>
+              <th class="text-left">成功次数</th>
+              <th class="text-left">首次获取</th>
+              <th class="text-left">最后获取</th>
+              <th class="text-left">距今</th>
+              <th class="text-left">制卡人</th>
+              <th class="text-left">卡密类型</th>
+              <th class="text左">状态</th>
+              <th class="text-left">创建时间</th>
+            </tr>
+          </thead>
+          <tbody id="suspicious-table-body">
+            <tr><td colspan="9" class="text-center text-gray-400 py-6">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+
+  <script src="/assets/js/mobile.js"></script>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const API_BASE_URL = (() => {
+      const override = window.API_BASE_URL_OVERRIDE;
+      if (override && typeof override === 'string') {
+        return override.replace(/\/$/, '');
+      }
+      if (window.location && window.location.origin) {
+        return `${window.location.origin.replace(/\/$/, '')}/api`;
+      }
+      return '/api';
+    })();
+
+    function renderActions(container, actions, options = {}) {
+      if (!container || !Array.isArray(actions)) return;
+      container.innerHTML = '';
+      const helper = window.MobileFriendly;
+      if (helper && typeof helper.renderActions === 'function') {
+        helper.renderActions(container, actions, options);
+        return;
+      }
+      actions.forEach(action => {
+        if (!action) return;
+        const element = document.createElement(action.element || 'button');
+        if ((action.element || 'button') === 'button') {
+          element.type = 'button';
+        }
+        element.className = action.className || 'px-3 py-1 glass rounded text-sm';
+        if (action.html) {
+          element.innerHTML = action.html;
+        } else {
+          element.textContent = action.label || action.text || '操作';
+        }
+        if (typeof action.onClick === 'function') {
+          element.addEventListener('click', action.onClick);
+        }
+        container.appendChild(element);
+      });
+    }
+
+    const TOKEN_STORAGE_KEY = 'sp_agent_token';
+    const TOKEN_EXPIRY_STORAGE_KEY = 'sp_agent_token_exp';
+    const LEGACY_TOKEN_STORAGE_KEY = 'sp_token';
+    const LEGACY_TOKEN_EXPIRY_STORAGE_KEY = 'sp_token_exp';
+    let authToken = null;
+    let authTokenExpiry = null;
+    let currentUser = null;
+
+    const toast = document.getElementById('toast');
+    const toastIcon = document.getElementById('toast-icon');
+    const toastMessage = document.getElementById('toast-message');
+
+    const backBtn = document.getElementById('back-btn');
+    const logoutBtn = document.getElementById('logout-btn');
+
+    const lanzouTableBody = document.getElementById('lanzou-table-body');
+    const lanzouSelectAll = document.getElementById('lanzou-select-all');
+    const lanzouKeywordInput = document.getElementById('lanzou-keyword');
+    const lanzouSearchBtn = document.getElementById('lanzou-search');
+    const lanzouResetBtn = document.getElementById('lanzou-reset');
+    const lanzouDeleteBtn = document.getElementById('lanzou-delete');
+    const lanzouPrevBtn = document.getElementById('lanzou-prev');
+    const lanzouNextBtn = document.getElementById('lanzou-next');
+    const lanzouPageInfo = document.getElementById('lanzou-page-info');
+
+    const logTableBody = document.getElementById('log-table-body');
+    const logSelectAll = document.getElementById('log-select-all');
+    const logCardKeyInput = document.getElementById('log-card-key');
+    const logIpInput = document.getElementById('log-ip');
+    const logKeywordInput = document.getElementById('log-keyword');
+    const logSuccessSelect = document.getElementById('log-success');
+    const logSearchBtn = document.getElementById('log-search');
+    const logResetBtn = document.getElementById('log-reset');
+    const logDeleteBtn = document.getElementById('log-delete');
+    const logPrevBtn = document.getElementById('log-prev');
+    const logNextBtn = document.getElementById('log-next');
+    const logPageInfo = document.getElementById('log-page-info');
+
+    const suspiciousTableBody = document.getElementById('suspicious-table-body');
+    const suspiciousMinCount = document.getElementById('suspicious-min-count');
+    const suspiciousHours = document.getElementById('suspicious-hours');
+    const suspiciousRefreshBtn = document.getElementById('suspicious-refresh');
+    const suspiciousResetBtn = document.getElementById('suspicious-reset');
+
+    const lanzouState = { keyword: '', page: 1, limit: 10, total: 0, selected: new Set() };
+    const logState = { cardKey: '', ipAddress: '', keyword: '', success: 'all', page: 1, limit: 10, total: 0, selected: new Set() };
+    const suspiciousState = { minCount: 3, hours: 2 };
+
+    function showToast(message, type = 'success') {
+      toastMessage.textContent = message;
+      if (type === 'success') toastIcon.className = 'fa fa-check-circle text-green-400';
+      else if (type === 'error') toastIcon.className = 'fa fa-exclamation-circle text-red-400';
+      else toastIcon.className = 'fa fa-info-circle text-blue-400';
+      toast.classList.remove('translate-x-full');
+      setTimeout(() => toast.classList.add('translate-x-full'), 2200);
+    }
+
+    function restoreTokenFromStorage() {
+      const storagePairs = [
+        { token: TOKEN_STORAGE_KEY, expiry: TOKEN_EXPIRY_STORAGE_KEY },
+        { token: LEGACY_TOKEN_STORAGE_KEY, expiry: LEGACY_TOKEN_EXPIRY_STORAGE_KEY }
+      ];
+      authToken = null;
+      authTokenExpiry = null;
+      for (const pair of storagePairs) {
+        try {
+          const storedToken = localStorage.getItem(pair.token);
+          const storedExpiry = localStorage.getItem(pair.expiry);
+          if (!storedToken) {
+            continue;
+          }
+          authToken = storedToken;
+          if (storedExpiry) {
+            const parsed = Date.parse(storedExpiry);
+            authTokenExpiry = Number.isNaN(parsed) ? null : parsed;
+          } else {
+            authTokenExpiry = null;
+          }
+          if (pair.token !== TOKEN_STORAGE_KEY) {
+            try { localStorage.setItem(TOKEN_STORAGE_KEY, storedToken); } catch {}
+            if (storedExpiry) {
+              const normalized = authTokenExpiry ? new Date(authTokenExpiry).toISOString() : storedExpiry;
+              try { localStorage.setItem(TOKEN_EXPIRY_STORAGE_KEY, normalized); } catch {}
+            } else {
+              try { localStorage.removeItem(TOKEN_EXPIRY_STORAGE_KEY); } catch {}
+            }
+            try { localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY); } catch {}
+            try { localStorage.removeItem(LEGACY_TOKEN_EXPIRY_STORAGE_KEY); } catch {}
+          }
+          break;
+        } catch (err) {
+          authToken = null;
+          authTokenExpiry = null;
+        }
+      }
+      if (!authToken || (authTokenExpiry && authTokenExpiry <= Date.now())) {
+        clearAuthToken();
+      }
+    }
+
+    function updateTokenExpiry(expiresAt) {
+      if (!expiresAt) {
+        authTokenExpiry = null;
+        try {
+          localStorage.removeItem(TOKEN_EXPIRY_STORAGE_KEY);
+          localStorage.removeItem(LEGACY_TOKEN_EXPIRY_STORAGE_KEY);
+        } catch {}
+        return;
+      }
+      const parsed = Date.parse(expiresAt);
+      if (Number.isNaN(parsed)) return;
+      authTokenExpiry = parsed;
+      try {
+        localStorage.setItem(TOKEN_EXPIRY_STORAGE_KEY, new Date(parsed).toISOString());
+        localStorage.removeItem(LEGACY_TOKEN_EXPIRY_STORAGE_KEY);
+      } catch {}
+    }
+
+    function clearAuthToken() {
+      authToken = null;
+      authTokenExpiry = null;
+      try {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        localStorage.removeItem(TOKEN_EXPIRY_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_TOKEN_EXPIRY_STORAGE_KEY);
+      } catch {}
+    }
+
+    function isTokenValid() {
+      if (!authToken) return false;
+      if (!authTokenExpiry) return true;
+      return authTokenExpiry > Date.now();
+    }
+
+    function handleUnauthorized(message = '登录状态已过期，请重新登录') {
+      showToast(message, 'error');
+      clearAuthToken();
+      setTimeout(() => { window.location.href = '/pages/index/index.html'; }, 1200);
+    }
+
+    function api(url, opts = {}) {
+      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      if (authToken && isTokenValid()) {
+        headers.Authorization = `Bearer ${authToken}`;
+      }
+      const final = { credentials: 'include', ...opts, headers };
+      return fetch(url, final).then(response => {
+        if (response.status === 401) {
+          handleUnauthorized();
+        }
+        return response;
+      });
+    }
+
+    function formatDateTime(value) {
+      if (!value) return '--';
+      const date = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(date.getTime())) return '--';
+      return date.toLocaleString();
+    }
+
+    function normalizeDuration(duration) {
+      if (!duration) return { totalSeconds: 0 };
+      if (typeof duration === 'string') {
+        const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        if (match) {
+          const h = Number(match[1] || 0);
+          const m = Number(match[2] || 0);
+          const s = Number(match[3] || 0);
+          return { totalSeconds: h * 3600 + m * 60 + s };
+        }
+      }
+      if (typeof duration === 'object') {
+        const seconds = Number(duration.totalSeconds ?? duration.TotalSeconds ?? duration.seconds ?? duration.Seconds ?? 0);
+        return { totalSeconds: seconds };
+      }
+      return { totalSeconds: 0 };
+    }
+
+    function formatDuration(duration) {
+      const normalized = normalizeDuration(duration);
+      const totalSeconds = normalized.totalSeconds;
+      if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '0秒';
+      let remaining = Math.floor(totalSeconds);
+      const parts = [];
+      const days = Math.floor(remaining / 86400);
+      if (days > 0) { parts.push(`${days}天`); remaining -= days * 86400; }
+      const hours = Math.floor(remaining / 3600);
+      if (hours > 0) { parts.push(`${hours}小时`); remaining -= hours * 3600; }
+      const minutes = Math.floor(remaining / 60);
+      if (minutes > 0) { parts.push(`${minutes}分钟`); remaining -= minutes * 60; }
+      if (parts.length === 0 || remaining > 0) {
+        parts.push(`${remaining}秒`);
+      }
+      return parts.slice(0, 3).join('');
+    }
+
+    function renderLanzouTable(items) {
+      lanzouTableBody.innerHTML = '';
+      if (!Array.isArray(items) || !items.length) {
+        lanzouTableBody.innerHTML = '<tr><td colspan="7" class="text-center text-gray-400 py-6">暂无数据</td></tr>';
+        return;
+      }
+      items.forEach(item => {
+        const tr = document.createElement('tr');
+        const id = item.id;
+        const createdAt = formatDateTime(item.createdAt);
+        const url = item.url || '';
+        tr.innerHTML = `
+          <td><input type="checkbox" data-id="${id}"></td>
+          <td class="text-sm text-gray-200">${id}</td>
+          <td class="text-sm break-all"><a href="${url || '#'}" class="text-[var(--secondary)]" target="_blank" rel="noopener noreferrer">${url || '-'}</a></td>
+          <td class="text-sm">${item.extractionCode || '-'}</td>
+          <td class="text-sm">${createdAt}</td>
+          <td class="text-sm break-all">${item.rawContent || '-'}</td>
+          <td class="text-sm"><div class="table-actions flex flex-wrap gap-2"></div></td>`;
+        const checkbox = tr.querySelector('input[type="checkbox"]');
+        if (lanzouState.selected.has(id)) checkbox.checked = true;
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) lanzouState.selected.add(id);
+          else lanzouState.selected.delete(id);
+          syncLanzouSelectAll();
+        });
+        const actions = [];
+        if (url) {
+          actions.push({
+            label: '打开链接',
+            className: 'px-3 py-1 glass rounded text-sm',
+            onClick: () => window.open(url, '_blank'),
+            closeOnClick: false
+          });
+        }
+        actions.push({
+          label: '删除',
+          className: 'px-3 py-1 glass rounded text-red-300',
+          onClick: () => deleteLanzouRecords([id]),
+          closeOnClick: true
+        });
+        const actionContainer = tr.querySelector('.table-actions');
+        renderActions(actionContainer, actions);
+        tr._mobileActions = actions;
+        tr.dataset.mobileTitle = url || `ID ${id}`;
+        lanzouTableBody.appendChild(tr);
+      });
+      syncLanzouSelectAll();
+    }
+
+    function syncLanzouSelectAll() {
+      if (!lanzouSelectAll) return;
+      const totalCheckboxes = lanzouTableBody.querySelectorAll('input[type="checkbox"]').length;
+      const selectedCount = lanzouState.selected.size;
+      lanzouSelectAll.checked = totalCheckboxes > 0 && selectedCount === totalCheckboxes;
+      lanzouSelectAll.indeterminate = selectedCount > 0 && selectedCount < totalCheckboxes;
+    }
+
+    function renderLogTable(items) {
+      logTableBody.innerHTML = '';
+      if (!Array.isArray(items) || !items.length) {
+        logTableBody.innerHTML = '<tr><td colspan="11" class="text-center text-gray-400 py-6">暂无数据</td></tr>';
+        return;
+      }
+      items.forEach(item => {
+        const tr = document.createElement('tr');
+        const id = item.id;
+        const createdAt = formatDateTime(item.createdAt);
+        const success = item.wasSuccessful;
+        const tagClass = success ? 'tag tag-success' : 'tag tag-danger';
+        const tagText = success ? '成功' : '失败';
+        tr.innerHTML = `
+          <td><input type="checkbox" data-id="${id}"></td>
+          <td class="text-sm text-gray-200">${id}</td>
+          <td class="text-sm break-all">${item.cardKey || '-'}</td>
+          <td class="text-sm">${item.ipAddress || '-'}</td>
+          <td class="text-sm">${item.attemptNumber}</td>
+          <td class="text-sm"><span class="${tagClass}">${tagText}</span></td>
+          <td class="text-sm">${item.downloadLinkId ?? '-'}</td>
+          <td class="text-sm break-all">${item.downloadUrl || '-'}</td>
+          <td class="text-sm">${item.extractionCode || '-'}</td>
+          <td class="text-sm">${createdAt}</td>
+          <td class="text-sm"><div class="table-actions flex flex-wrap gap-2"></div></td>`;
+        const checkbox = tr.querySelector('input[type="checkbox"]');
+        if (logState.selected.has(id)) checkbox.checked = true;
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) logState.selected.add(id);
+          else logState.selected.delete(id);
+          syncLogSelectAll();
+        });
+        const actions = [
+          {
+            label: '删除',
+            className: 'px-3 py-1 glass rounded text-red-300',
+            onClick: () => deleteLogRecords([id]),
+            closeOnClick: true
+          }
+        ];
+        const actionContainer = tr.querySelector('.table-actions');
+        renderActions(actionContainer, actions);
+        tr._mobileActions = actions;
+        tr.dataset.mobileTitle = item.cardKey || `记录 ${id}`;
+        logTableBody.appendChild(tr);
+      });
+      syncLogSelectAll();
+    }
+
+    function syncLogSelectAll() {
+      if (!logSelectAll) return;
+      const totalCheckboxes = logTableBody.querySelectorAll('input[type="checkbox"]').length;
+      const selectedCount = logState.selected.size;
+      logSelectAll.checked = totalCheckboxes > 0 && selectedCount === totalCheckboxes;
+      logSelectAll.indeterminate = selectedCount > 0 && selectedCount < totalCheckboxes;
+    }
+
+    function renderSuspiciousTable(items) {
+      suspiciousTableBody.innerHTML = '';
+      if (!Array.isArray(items) || !items.length) {
+        suspiciousTableBody.innerHTML = '<tr><td colspan="9" class="text-center text-gray-400 py-6">暂无可疑卡密</td></tr>';
+        return;
+      }
+      items.forEach(item => {
+        const durationText = formatDuration(item.durationSinceLast);
+        const createdAt = item.cardCreatedAt ? formatDateTime(item.cardCreatedAt) : '-';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="text-sm break-all">${item.cardKey || '-'}</td>
+          <td class="text-sm">${item.successCount || 0}</td>
+          <td class="text-sm">${formatDateTime(item.firstSuccessAt)}</td>
+          <td class="text-sm">${formatDateTime(item.lastSuccessAt)}</td>
+          <td class="text-sm">${durationText}</td>
+          <td class="text-sm">${item.whom || '-'}</td>
+          <td class="text-sm">${item.cardType || '-'}</td>
+          <td class="text-sm">${item.state || '-'}</td>
+          <td class="text-sm">${createdAt}</td>`;
+        tr.dataset.mobileTitle = item.cardKey || '-';
+        suspiciousTableBody.appendChild(tr);
+      });
+    }
+
+    async function loadLanzouLinks() {
+      lanzouState.selected.clear();
+      if (lanzouSelectAll) lanzouSelectAll.checked = false;
+      lanzouTableBody.innerHTML = '<tr><td colspan="7" class="text-center text-gray-400 py-6">加载中...</td></tr>';
+      try {
+        const payload = { keyword: lanzouState.keyword, page: lanzouState.page, limit: lanzouState.limit };
+        const resp = await api(`${API_BASE_URL}/LinkAudit/listLanzouLinks`, { method: 'POST', body: JSON.stringify(payload) });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data?.code !== 0) throw new Error(data?.message || '获取失败');
+        const result = data.data || {};
+        const items = Array.isArray(result.items) ? result.items : [];
+        lanzouState.total = Number(result.total || items.length || 0);
+        renderLanzouTable(items);
+        updateLanzouPagination();
+      } catch (err) {
+        console.error('loadLanzouLinks', err);
+        lanzouTableBody.innerHTML = `<tr><td colspan="7" class="text-center text-red-400 py-6">${err.message || '获取失败'}</td></tr>`;
+      }
+    }
+
+    function updateLanzouPagination() {
+      const totalPages = Math.max(1, Math.ceil(lanzouState.total / lanzouState.limit));
+      if (lanzouPrevBtn) lanzouPrevBtn.disabled = lanzouState.page <= 1;
+      if (lanzouNextBtn) lanzouNextBtn.disabled = lanzouState.page >= totalPages;
+      const start = lanzouState.total === 0 ? 0 : (lanzouState.page - 1) * lanzouState.limit + 1;
+      const end = lanzouState.total === 0 ? 0 : Math.min(lanzouState.page * lanzouState.limit, lanzouState.total);
+      if (lanzouPageInfo) lanzouPageInfo.textContent = `第 ${start}-${end} 条 / 共 ${lanzouState.total} 条`;
+    }
+
+    async function deleteLanzouRecords(ids) {
+      if (!Array.isArray(ids) || !ids.length) return;
+      try {
+        const resp = await api(`${API_BASE_URL}/LinkAudit/deleteLanzouLinks`, { method: 'POST', body: JSON.stringify({ ids }) });
+        const data = await resp.json();
+        if (data?.code === 0) {
+          showToast(data?.message || '删除成功');
+          await loadLanzouLinks();
+        } else {
+          throw new Error(data?.message || '删除失败');
+        }
+      } catch (err) {
+        console.error('deleteLanzouRecords', err);
+        showToast(err.message || '删除失败', 'error');
+      }
+    }
+
+    async function loadVerificationLogs() {
+      logState.selected.clear();
+      if (logSelectAll) logSelectAll.checked = false;
+      logTableBody.innerHTML = '<tr><td colspan="11" class="text-center text-gray-400 py-6">加载中...</td></tr>';
+      try {
+        const payload = {
+          cardKey: logState.cardKey,
+          ipAddress: logState.ipAddress,
+          keyword: logState.keyword,
+          page: logState.page,
+          limit: logState.limit
+        };
+        if (logState.success === 'success') payload.wasSuccessful = true;
+        else if (logState.success === 'failed') payload.wasSuccessful = false;
+        const resp = await api(`${API_BASE_URL}/LinkAudit/listVerificationLogs`, { method: 'POST', body: JSON.stringify(payload) });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data?.code !== 0) throw new Error(data?.message || '获取失败');
+        const result = data.data || {};
+        const items = Array.isArray(result.items) ? result.items : [];
+        logState.total = Number(result.total || items.length || 0);
+        renderLogTable(items);
+        updateLogPagination();
+      } catch (err) {
+        console.error('loadVerificationLogs', err);
+        logTableBody.innerHTML = `<tr><td colspan="11" class="text-center text-red-400 py-6">${err.message || '获取失败'}</td></tr>`;
+      }
+    }
+
+    function updateLogPagination() {
+      const totalPages = Math.max(1, Math.ceil(logState.total / logState.limit));
+      if (logPrevBtn) logPrevBtn.disabled = logState.page <= 1;
+      if (logNextBtn) logNextBtn.disabled = logState.page >= totalPages;
+      const start = logState.total === 0 ? 0 : (logState.page - 1) * logState.limit + 1;
+      const end = logState.total === 0 ? 0 : Math.min(logState.page * logState.limit, logState.total);
+      if (logPageInfo) logPageInfo.textContent = `第 ${start}-${end} 条 / 共 ${logState.total} 条`;
+    }
+
+    async function deleteLogRecords(ids) {
+      if (!Array.isArray(ids) || !ids.length) return;
+      try {
+        const resp = await api(`${API_BASE_URL}/LinkAudit/deleteVerificationLogs`, { method: 'POST', body: JSON.stringify({ ids }) });
+        const data = await resp.json();
+        if (data?.code === 0) {
+          showToast(data?.message || '删除成功');
+          await loadVerificationLogs();
+        } else {
+          throw new Error(data?.message || '删除失败');
+        }
+      } catch (err) {
+        console.error('deleteLogRecords', err);
+        showToast(err.message || '删除失败', 'error');
+      }
+    }
+
+    async function loadSuspiciousRecords() {
+      suspiciousTableBody.innerHTML = '<tr><td colspan="9" class="text-center text-gray-400 py-6">加载中...</td></tr>';
+      try {
+        const payload = {
+          minSuccessCount: suspiciousState.minCount,
+          staleHours: suspiciousState.hours
+        };
+        const resp = await api(`${API_BASE_URL}/LinkAudit/getSuspiciousCards`, { method: 'POST', body: JSON.stringify(payload) });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data?.code !== 0) throw new Error(data?.message || '获取失败');
+        renderSuspiciousTable(Array.isArray(data.data) ? data.data : []);
+      } catch (err) {
+        console.error('loadSuspiciousRecords', err);
+        suspiciousTableBody.innerHTML = `<tr><td colspan="9" class="text-center text-red-400 py-6">${err.message || '获取失败'}</td></tr>`;
+      }
+    }
+
+    function resetSuspiciousFilters() {
+      suspiciousState.minCount = 3;
+      suspiciousState.hours = 2;
+      suspiciousMinCount.value = '3';
+      suspiciousHours.value = '2';
+    }
+
+    function applySuspiciousFilters() {
+      const count = Number(suspiciousMinCount.value || '3');
+      const hours = Number(suspiciousHours.value || '2');
+      suspiciousState.minCount = Number.isFinite(count) && count > 0 ? count : 3;
+      suspiciousState.hours = Number.isFinite(hours) && hours > 0 ? hours : 2;
+    }
+
+    function attachEvents() {
+      if (backBtn) backBtn.addEventListener('click', () => window.location.href = '/pages/index/index.html');
+
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+          try {
+            await api(`${API_BASE_URL}/Auth/logout`, { method: 'POST' });
+          } catch (err) {
+            console.error('logout error', err);
+          } finally {
+            clearAuthToken();
+            window.location.href = '/pages/index/index.html';
+          }
+        });
+      }
+
+      if (lanzouSearchBtn) lanzouSearchBtn.addEventListener('click', () => {
+        lanzouState.keyword = (lanzouKeywordInput.value || '').trim();
+        lanzouState.page = 1;
+        loadLanzouLinks();
+      });
+      if (lanzouResetBtn) lanzouResetBtn.addEventListener('click', () => {
+        lanzouKeywordInput.value = '';
+        lanzouState.keyword = '';
+        lanzouState.page = 1;
+        loadLanzouLinks();
+      });
+      if (lanzouPrevBtn) lanzouPrevBtn.addEventListener('click', () => {
+        if (lanzouState.page > 1) {
+          lanzouState.page -= 1;
+          loadLanzouLinks();
+        }
+      });
+      if (lanzouNextBtn) lanzouNextBtn.addEventListener('click', () => {
+        const totalPages = Math.max(1, Math.ceil(lanzouState.total / lanzouState.limit));
+        if (lanzouState.page < totalPages) {
+          lanzouState.page += 1;
+          loadLanzouLinks();
+        }
+      });
+      if (lanzouSelectAll) lanzouSelectAll.addEventListener('change', () => {
+        const checkboxes = lanzouTableBody.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => {
+          cb.checked = lanzouSelectAll.checked;
+          const id = Number(cb.dataset.id);
+          if (cb.checked) lanzouState.selected.add(id);
+          else lanzouState.selected.delete(id);
+        });
+      });
+      if (lanzouDeleteBtn) lanzouDeleteBtn.addEventListener('click', () => {
+        if (!lanzouState.selected.size) {
+          showToast('请先选择需要删除的链接', 'info');
+          return;
+        }
+        deleteLanzouRecords(Array.from(lanzouState.selected));
+      });
+
+      if (logSearchBtn) logSearchBtn.addEventListener('click', () => {
+        logState.cardKey = (logCardKeyInput.value || '').trim();
+        logState.ipAddress = (logIpInput.value || '').trim();
+        logState.keyword = (logKeywordInput.value || '').trim();
+        logState.success = logSuccessSelect.value || 'all';
+        logState.page = 1;
+        loadVerificationLogs();
+      });
+      if (logResetBtn) logResetBtn.addEventListener('click', () => {
+        logCardKeyInput.value = '';
+        logIpInput.value = '';
+        logKeywordInput.value = '';
+        logSuccessSelect.value = 'all';
+        logState.cardKey = '';
+        logState.ipAddress = '';
+        logState.keyword = '';
+        logState.success = 'all';
+        logState.page = 1;
+        loadVerificationLogs();
+      });
+      if (logPrevBtn) logPrevBtn.addEventListener('click', () => {
+        if (logState.page > 1) {
+          logState.page -= 1;
+          loadVerificationLogs();
+        }
+      });
+      if (logNextBtn) logNextBtn.addEventListener('click', () => {
+        const totalPages = Math.max(1, Math.ceil(logState.total / logState.limit));
+        if (logState.page < totalPages) {
+          logState.page += 1;
+          loadVerificationLogs();
+        }
+      });
+      if (logSelectAll) logSelectAll.addEventListener('change', () => {
+        const checkboxes = logTableBody.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => {
+          cb.checked = logSelectAll.checked;
+          const id = Number(cb.dataset.id);
+          if (cb.checked) logState.selected.add(id);
+          else logState.selected.delete(id);
+        });
+      });
+      if (logDeleteBtn) logDeleteBtn.addEventListener('click', () => {
+        if (!logState.selected.size) {
+          showToast('请先选择需要删除的日志', 'info');
+          return;
+        }
+        deleteLogRecords(Array.from(logState.selected));
+      });
+
+      if (suspiciousRefreshBtn) suspiciousRefreshBtn.addEventListener('click', () => {
+        applySuspiciousFilters();
+        loadSuspiciousRecords();
+      });
+      if (suspiciousResetBtn) suspiciousResetBtn.addEventListener('click', () => {
+        resetSuspiciousFilters();
+        applySuspiciousFilters();
+        loadSuspiciousRecords();
+      });
+    }
+
+    async function ensureSession() {
+      if (!isTokenValid()) {
+        handleUnauthorized();
+        return false;
+      }
+      try {
+        const resp = await api(`${API_BASE_URL}/Auth/getUserInfo`, { method: 'POST' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data?.code !== 0) throw new Error(data?.message || '会话无效');
+        const payload = data.data || {};
+        if (payload.tokenExpiresAt) updateTokenExpiry(payload.tokenExpiresAt);
+        if (!payload.isSuper) {
+          showToast('当前账号无权访问此页面', 'error');
+          setTimeout(() => window.location.href = '/pages/index/index.html', 1500);
+          return false;
+        }
+        currentUser = { username: payload.username, isSuper: true };
+        return true;
+      } catch (err) {
+        console.error('ensureSession', err);
+        handleUnauthorized(err.message || '会话无效');
+        return false;
+      }
+    }
+
+    async function init() {
+      restoreTokenFromStorage();
+      attachEvents();
+      if (!await ensureSession()) {
+        return;
+      }
+      await Promise.all([
+        loadLanzouLinks(),
+        loadVerificationLogs(),
+        loadSuspiciousRecords()
+      ]);
+    }
+
+    init();
+  });
+  </script>
+</body>
+</html>

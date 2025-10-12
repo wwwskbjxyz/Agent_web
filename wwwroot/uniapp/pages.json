@@ -1,0 +1,83 @@
+{
+  "pages": [
+    {
+      "path": "pages/login/index",
+      "style": {
+        "navigationBarTitleText": "登录",
+        "navigationBarTextStyle": "white",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "控制面板",
+        "enablePullDownRefresh": false,
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#05070f"
+      }
+    },
+    {
+      "path": "pages/cards/index",
+      "style": {
+        "navigationBarTitleText": "卡密列表",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#05070f"
+      }
+    },
+    {
+      "path": "pages/agents/index",
+      "style": {
+        "navigationBarTitleText": "代理管理",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#05070f"
+      }
+    },
+    {
+      "path": "pages/links/index",
+      "style": {
+        "navigationBarTitleText": "联动记录",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#05070f"
+      }
+    },
+    {
+      "path": "pages/chat/index",
+      "style": {
+        "navigationBarTitleText": "即时沟通",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#05070f"
+      }
+    },
+    {
+      "path": "pages/verify/index",
+      "style": {
+        "navigationBarTitleText": "卡密验证",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#05070f"
+      }
+    },
+    {
+      "path": "pages/blacklist/logs/index",
+      "style": {
+        "navigationBarTitleText": "黑名单记录",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#05070f"
+      }
+    },
+    {
+      "path": "pages/blacklist/machines/index",
+      "style": {
+        "navigationBarTitleText": "黑名单机器码",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#05070f"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "SProtectAgent",
+    "navigationBarBackgroundColor": "#000000",
+    "backgroundColor": "#000000"
+  }
+}
