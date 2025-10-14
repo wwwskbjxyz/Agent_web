@@ -361,3 +361,8 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Allow UniApp blacklist logs page assets
+!SProtectAgentWeb.Api/wwwroot/uniapp/pages/blacklist/
+!SProtectAgentWeb.Api/wwwroot/uniapp/pages/blacklist/logs/
+!SProtectAgentWeb.Api/wwwroot/uniapp/pages/blacklist/logs/index.vue
