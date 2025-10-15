@@ -413,9 +413,13 @@ function resolveShareQuery(options: Record<string, any> | undefined): string {
     return '';
   }
 
-  const softwareValue = normalizeParam(options.software ?? options.s);
-  const codeValue = normalizeParam(options.code ?? options.c);
-  const agentValue = normalizeParam(options.agent ?? options.a);
+  const softwareValue = normalizeParam(
+    options.software ?? options.s ?? options.softwareName ?? options.slot
+  );
+  const codeValue = normalizeParam(
+    options.code ?? options.c ?? options.softwareCode ?? options.binding
+  );
+  const agentValue = normalizeParam(options.agent ?? options.a ?? options.agentAccount);
   const gatewayValue = resolveGateway(normalizeParam(options.gateway ?? options.api ?? options.gw));
 
   const parts: string[] = [];
@@ -527,9 +531,9 @@ function decodeLegacySlug(slug: string): ActiveVerificationContext | null {
       ? new TextDecoder().decode(new Uint8Array(buffer))
       : utf8Decode(new Uint8Array(buffer));
     const raw = JSON.parse(json) ?? {};
-    const software = normalizeParam(raw.s || raw.software);
-    const softwareCode = normalizeParam(raw.c || raw.code);
-    const agentAccount = normalizeParam(raw.a || raw.agent);
+    const software = normalizeParam(raw.s || raw.software || raw.softwareName || raw.slot);
+    const softwareCode = normalizeParam(raw.c || raw.code || raw.softwareCode || raw.binding);
+    const agentAccount = normalizeParam(raw.a || raw.agent || raw.agentAccount);
     const gateway = resolveGateway(normalizeParam(raw.g || raw.gateway));
     if (!software || !softwareCode) {
       return null;

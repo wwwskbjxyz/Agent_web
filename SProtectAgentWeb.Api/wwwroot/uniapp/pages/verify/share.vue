@@ -213,9 +213,13 @@ function resolveFromOptions(options: Record<string, any> | undefined): ShareCont
     }
   }
 
-  const softwareValue = decodeComponent(options.s ?? options.software);
-  const codeValue = decodeComponent(options.c ?? options.code);
-  const agentValue = decodeComponent(options.a ?? options.agent);
+  const softwareValue = decodeComponent(
+    options.s ?? options.software ?? options.softwareName ?? options.slot
+  );
+  const codeValue = decodeComponent(
+    options.c ?? options.code ?? options.softwareCode ?? options.binding
+  );
+  const agentValue = decodeComponent(options.a ?? options.agent ?? options.agentAccount);
   const gatewayValue = resolveGateway(decodeComponent(options.gateway ?? options.api ?? options.gw));
 
   if (softwareValue && codeValue) {
@@ -263,9 +267,9 @@ function resolveFromRoute(): ShareContext | null {
       return decoded;
     }
   }
-  const softwareValue = map.s || map.software || '';
-  const codeValue = map.c || map.code || '';
-  const agentValue = map.a || map.agent || '';
+  const softwareValue = map.s || map.software || map.softwarename || map.slot || '';
+  const codeValue = map.c || map.code || map.softwarecode || map.binding || '';
+  const agentValue = map.a || map.agent || map.agentaccount || '';
   const gatewayValue = resolveGateway(decodeComponent(map.gateway || map.api || map.gw));
   if (softwareValue && codeValue) {
     return {
@@ -326,9 +330,9 @@ function decodeShareSlug(slug: string): ShareContext | null {
     const buffer = base64ToArrayBuffer(base64);
     const json = utf8Decode(new Uint8Array(buffer));
     const raw = JSON.parse(json) ?? {};
-    const softwareValue = sanitizeString(raw.s);
-    const codeValue = sanitizeString(raw.c);
-    const agentValue = sanitizeString(raw.a);
+    const softwareValue = sanitizeString(raw.s ?? raw.software ?? raw.softwareName ?? raw.slot);
+    const codeValue = sanitizeString(raw.c ?? raw.code ?? raw.softwareCode ?? raw.binding);
+    const agentValue = sanitizeString(raw.a ?? raw.agent ?? raw.agentAccount);
     const gatewayValue = resolveGateway(sanitizeString(raw.g));
     if (!softwareValue || !codeValue) {
       return null;

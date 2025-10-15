@@ -492,9 +492,9 @@
                 }
             }
 
-            const software = decodeURIComponentSafe(map.s || map.software || '');
-            const code = decodeURIComponentSafe(map.c || map.code || '');
-            const agent = decodeURIComponentSafe(map.a || map.agent || '');
+            const software = decodeURIComponentSafe(map.s || map.software || map.softwareName || map.slot || '');
+            const code = decodeURIComponentSafe(map.c || map.code || map.softwarecode || map.softwareCode || map.binding || '');
+            const agent = decodeURIComponentSafe(map.a || map.agent || map.agentAccount || '');
             const gateway = resolveGateway(decodeURIComponentSafe(map.gateway || map.api || map.gw || ''));
 
             if (software && code) {
@@ -560,9 +560,17 @@
                 const bytes = base64ToBytes(base64);
                 const json = utf8Decode(bytes);
                 const payload = JSON.parse(json) || {};
-                const software = typeof payload.s === 'string' ? payload.s.trim() : '';
-                const code = typeof payload.c === 'string' ? payload.c.trim() : '';
-                const agent = typeof payload.a === 'string' ? payload.a.trim() : '';
+                const software = typeof payload.s === 'string'
+                    ? payload.s.trim()
+                    : (typeof payload.software === 'string' ? payload.software.trim() : '');
+                const code = typeof payload.c === 'string'
+                    ? payload.c.trim()
+                    : (typeof payload.code === 'string'
+                        ? payload.code.trim()
+                        : (typeof payload.softwareCode === 'string' ? payload.softwareCode.trim() : ''));
+                const agent = typeof payload.a === 'string'
+                    ? payload.a.trim()
+                    : (typeof payload.agent === 'string' ? payload.agent.trim() : '');
                 const gateway = resolveGateway(typeof payload.g === 'string' ? payload.g.trim() : '');
                 if (!software || !code) {
                     return null;
