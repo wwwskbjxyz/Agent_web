@@ -606,6 +606,14 @@ export interface CardVerificationResult {
   message: string;
 }
 
+export interface CardVerificationShareContext {
+  software: string;
+  softwareCode: string;
+  softwareDisplayName?: string;
+  agentAccount?: string;
+  agentDisplayName?: string;
+}
+
 export type VerificationStatus = 'success' | 'warning' | 'error' | 'info';
 
 export interface VerificationRecordItem {

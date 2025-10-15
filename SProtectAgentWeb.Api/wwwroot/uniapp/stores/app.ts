@@ -2151,7 +2151,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function loadVerification(
     cardKey?: string,
-    context?: { software: string; softwareCode?: string; agentAccount?: string }
+    context?: { software: string; softwareCode?: string; agentAccount?: string; gateway?: string }
   ) {
     loading.verification = true;
     try {

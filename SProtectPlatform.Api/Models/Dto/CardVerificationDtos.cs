@@ -19,6 +19,22 @@ public sealed class CardVerificationRequestDto
         = null;
 }
 
+public sealed class CardVerificationContextDto
+{
+    public string Software { get; set; } = string.Empty;
+
+    public string SoftwareCode { get; set; } = string.Empty;
+
+    public string? SoftwareDisplayName { get; set; }
+        = null;
+
+    public string? AgentAccount { get; set; }
+        = null;
+
+    public string? AgentDisplayName { get; set; }
+        = null;
+}
+
 public sealed class CardVerificationResultDto
 {
     public string CardKey { get; set; } = string.Empty;

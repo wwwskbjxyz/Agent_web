@@ -13,8 +13,9 @@
         <text class="context-value">{{ contextLabel }}</text>
       </view>
       <view v-if="contextCodeLabel" class="context-sub">绑定码：{{ contextCodeLabel }}</view>
+      <view v-if="contextAgentLabel" class="context-sub">所属代理：{{ contextAgentLabel }}</view>
       <view v-if="shareContextError" class="context-sub error">{{ shareContextError }}</view>
-      <view v-else-if="showShareInfo" class="context-share">
+      <view v-if="!shareContextError && showShareInfo" class="context-share">
         <text class="share-label">{{ shareLabel }}</text>
         <view class="share-row">
           <text class="share-url" @tap="copyShareLink">{{ shareDisplayValue }}</text>
@@ -134,6 +135,8 @@
 import { computed, ref, watch } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import { storeToRefs } from 'pinia';
+import { apiRequest, setBaseURL } from '@/common/api';
+import type { CardVerificationShareContext } from '@/common/types';
 import { useAppStore } from '@/stores/app';
 import { usePlatformStore } from '@/stores/platform';
 
@@ -141,6 +144,19 @@ interface ActiveVerificationContext {
   software: string;
   softwareCode?: string;
   agentAccount?: string;
+  displayName?: string;
+  agentDisplayName?: string;
+  gateway?: string;
+}
+
+interface ShareCandidate {
+  software?: string;
+  softwareCode?: string;
+  agentAccount?: string;
+  gateway?: string;
+  slug?: string;
+  softwareDisplayName?: string;
+  agentDisplayName?: string;
 }
 
 declare const getCurrentPages: (() => Array<{ route?: string }>) | undefined;
@@ -164,6 +180,7 @@ const linkContext = ref<ActiveVerificationContext | null>(null);
 const shareContextError = ref('');
 const generatorBindingId = ref<number | null>(null);
 const generatorSoftware = ref('');
+const defaultGateway = ref('');
 
 const payload = computed(() => verification.value);
 const loading = computed(() => appStore.loading.verification);
@@ -223,14 +240,20 @@ const generatorContext = computed<ActiveVerificationContext | null>(() => {
   return {
     software: softwareName,
     softwareCode: softwareCodeValue || undefined,
-    agentAccount: agentAccountValue || undefined
+    agentAccount: agentAccountValue || undefined,
+    displayName: softwareName
   };
 });
 
 const activeContext = computed<ActiveVerificationContext | null>(() => linkContext.value ?? generatorContext.value);
 
-const contextLabel = computed(() => activeContext.value?.software || '未选择');
+const contextLabel = computed(
+  () => activeContext.value?.displayName || activeContext.value?.software || '未选择'
+);
 const contextCodeLabel = computed(() => activeContext.value?.softwareCode || '');
+const contextAgentLabel = computed(
+  () => activeContext.value?.agentDisplayName || activeContext.value?.agentAccount || ''
+);
 
 const currentBindingLabel = computed(() => {
   if (!isGeneratorMode.value) {
@@ -408,43 +431,275 @@ function generateShareLink() {
   uni.showToast({ title: isH5 ? '已生成分享链接' : '已生成分享路径', icon: 'success' });
 }
 
-function resolveShareQuery(options: Record<string, any> | undefined): string {
-  if (!options) {
+function buildShareCandidate(
+  source: Record<string, any> | undefined
+): { detected: boolean; candidate: ShareCandidate } {
+  const candidate: ShareCandidate = {};
+  let detected = false;
+
+  if (!source) {
+    return { detected: false, candidate };
+  }
+
+  const readValue = (...keys: string[]): string => {
+    for (const key of keys) {
+      const direct = extractValue(key);
+      if (direct) {
+        return direct;
+      }
+    }
     return '';
-  }
+  };
 
-  const softwareValue = normalizeParam(options.software ?? options.s);
-  const codeValue = normalizeParam(options.code ?? options.c);
-  const agentValue = normalizeParam(options.agent ?? options.a);
+  const extractValue = (key: string): string => {
+    const raw = source[key];
+    if (typeof raw === 'string' && raw.trim()) {
+      return decodeURIComponentSafe(raw);
+    }
+    const lower = key.toLowerCase();
+    if (lower !== key) {
+      const fallback = source[lower];
+      if (typeof fallback === 'string' && fallback.trim()) {
+        return decodeURIComponentSafe(fallback);
+      }
+    }
+    return '';
+  };
 
-  const parts: string[] = [];
+  const softwareValue = normalizeParam(readValue('software', 's', 'softwareName', 'slot'));
   if (softwareValue) {
-    parts.push(`software=${encodeURIComponent(softwareValue)}`);
+    candidate.software = softwareValue;
+    detected = true;
   }
+
+  const displayValue = normalizeParam(
+    readValue('display', 'softwareDisplay', 'softwareDisplayName', 'name')
+  );
+  if (displayValue) {
+    candidate.softwareDisplayName = displayValue;
+    detected = true;
+  }
+
+  const codeValue = normalizeParam(readValue('code', 'c', 'softwareCode', 'binding'));
   if (codeValue) {
-    parts.push(`code=${encodeURIComponent(codeValue)}`);
+    candidate.softwareCode = codeValue;
+    detected = true;
   }
+
+  const agentValue = normalizeParam(readValue('agent', 'a', 'agentAccount'));
   if (agentValue) {
-    parts.push(`agent=${encodeURIComponent(agentValue)}`);
+    candidate.agentAccount = agentValue;
+    detected = true;
   }
 
-  if (parts.length >= 2) {
-    return parts.join('&');
+  const agentDisplayValue = normalizeParam(
+    readValue('agentName', 'agentDisplay', 'agentDisplayName')
+  );
+  if (agentDisplayValue) {
+    candidate.agentDisplayName = agentDisplayValue;
+    detected = true;
   }
 
-  const legacy = normalizeParam(options.share ?? options.context ?? options.slug ?? options.token);
-  if (legacy) {
-    const decoded = decodeLegacySlug(legacy);
-    if (decoded?.software && decoded?.softwareCode) {
-      return buildShareQueryString({
-        software: decoded.software,
-        softwareCode: decoded.softwareCode,
-        agentAccount: decoded.agentAccount
-      });
+  const gatewayRaw = normalizeParam(readValue('gateway', 'api', 'gw'));
+  if (gatewayRaw) {
+    detected = true;
+    const normalizedGateway = resolveGateway(gatewayRaw);
+    if (normalizedGateway) {
+      candidate.gateway = normalizedGateway;
     }
   }
 
-  return '';
+  const slugValue = normalizeParam(readValue('share', 'context', 'slug', 'token'));
+  if (slugValue) {
+    candidate.slug = slugValue;
+    detected = true;
+  }
+
+  return { detected, candidate };
+}
+
+async function detectShareCandidateFromRoute(): Promise<{
+  detected: boolean;
+  candidate: ShareCandidate;
+}> {
+  if (typeof getCurrentPages !== 'function') {
+    return { detected: false, candidate: {} as ShareCandidate };
+  }
+
+  const pages = getCurrentPages();
+  if (!Array.isArray(pages) || !pages.length) {
+    return { detected: false, candidate: {} as ShareCandidate };
+  }
+
+  const current = pages[pages.length - 1] as any;
+  const fullPath: string = current?.$page?.fullPath || current?.route || '';
+  if (!fullPath) {
+    return { detected: false, candidate: {} as ShareCandidate };
+  }
+
+  const queryIndex = fullPath.indexOf('?');
+  if (queryIndex >= 0) {
+    const queryString = fullPath.slice(queryIndex + 1);
+    const map = parseQuery(queryString);
+    return buildShareCandidate(map);
+  }
+
+  const segments = fullPath.split('/').filter(Boolean);
+  if (segments.length > 2) {
+    const slug = decodeURIComponentSafe(segments[segments.length - 1]);
+    if (slug) {
+      return buildShareCandidate({ share: slug });
+    }
+  }
+
+  return { detected: false, candidate: {} as ShareCandidate };
+}
+
+async function resolveContextFromCandidate(
+  candidate: ShareCandidate
+): Promise<ActiveVerificationContext | null> {
+  const slugContext = candidate.slug ? decodeLegacySlug(candidate.slug) : null;
+
+  const gatewayValue =
+    resolveGateway(candidate.gateway) || resolveGateway(slugContext?.gateway);
+
+  const softwareValue =
+    normalizeParam(candidate.software) || normalizeParam(slugContext?.software);
+  const codeValue =
+    normalizeParam(candidate.softwareCode) || normalizeParam(slugContext?.softwareCode);
+  const agentAccountValue =
+    normalizeParam(candidate.agentAccount) || normalizeParam(slugContext?.agentAccount);
+  const displayValue = normalizeParam(candidate.softwareDisplayName);
+  const agentDisplayValue = normalizeParam(candidate.agentDisplayName);
+
+  if (softwareValue && codeValue) {
+    return {
+      software: softwareValue,
+      softwareCode: codeValue,
+      agentAccount: agentAccountValue || undefined,
+      displayName: displayValue || softwareValue,
+      agentDisplayName: agentDisplayValue || undefined,
+      gateway: gatewayValue || undefined
+    };
+  }
+
+  if (!codeValue) {
+    return null;
+  }
+
+  const remote = await fetchShareContextByCode(codeValue, gatewayValue || undefined);
+  if (!remote) {
+    return null;
+  }
+
+  const remoteSoftware = normalizeParam(remote.software);
+  const remoteCode = normalizeParam(remote.softwareCode) || codeValue;
+  if (!remoteSoftware) {
+    return null;
+  }
+
+  return {
+    software: remoteSoftware,
+    softwareCode: remoteCode,
+    agentAccount: agentAccountValue || normalizeParam(remote.agentAccount) || undefined,
+    displayName:
+      displayValue || normalizeParam(remote.softwareDisplayName) || remoteSoftware,
+    agentDisplayName:
+      agentDisplayValue || normalizeParam(remote.agentDisplayName) || undefined,
+    gateway: gatewayValue || undefined
+  };
+}
+
+async function fetchShareContextByCode(
+  code: string,
+  gateway?: string
+): Promise<CardVerificationShareContext | null> {
+  const normalized = normalizeParam(code);
+  if (!normalized) {
+    return null;
+  }
+
+  const endpoint = gateway
+    ? `${gateway}/api/card-verification/context`
+    : '/api/card-verification/context';
+
+  try {
+    const payload = await apiRequest<CardVerificationShareContext>({
+      url: endpoint,
+      method: 'GET',
+      data: { softwareCode: normalized },
+      skipProxy: true,
+      auth: false
+    });
+    if (!payload) {
+      return null;
+    }
+    return payload;
+  } catch (error) {
+    console.warn('Failed to load verification context', error);
+    return null;
+  }
+}
+
+function applyLinkContext(context: ActiveVerificationContext) {
+  const sanitizedGateway = resolveGateway(context.gateway);
+  if (sanitizedGateway) {
+    defaultGateway.value = sanitizedGateway;
+    setBaseURL(sanitizedGateway);
+  }
+
+  const nextContext: ActiveVerificationContext = {
+    software: context.software,
+    softwareCode: context.softwareCode,
+    agentAccount: context.agentAccount,
+    displayName: context.displayName || context.software,
+    agentDisplayName: context.agentDisplayName || context.agentAccount,
+    gateway: sanitizedGateway || undefined
+  };
+
+  linkContext.value = nextContext;
+  shareQuery.value = buildShareQueryString(nextContext);
+  verification.value = null;
+  shareContextError.value = '';
+  code.value = '';
+  shareOrigin.value = 'link';
+}
+
+function parseQuery(input: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (!input) {
+    return map;
+  }
+
+  input.split('&').forEach((segment) => {
+    if (!segment) {
+      return;
+    }
+    const [rawKey, rawValue = ''] = segment.split('=');
+    const key = (rawKey || '').trim();
+    if (!key) {
+      return;
+    }
+    const decoded = decodeURIComponentSafe(rawValue);
+    map[key] = decoded;
+    const lower = key.toLowerCase();
+    if (lower !== key && map[lower] == null) {
+      map[lower] = decoded;
+    }
+  });
+
+  return map;
+}
+
+function decodeURIComponentSafe(value: any): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    return value;
+  }
 }
 
 function normalizeParam(value: any): string {
@@ -462,7 +717,27 @@ function buildShareQueryString(context: ActiveVerificationContext): string {
   if (context.agentAccount) {
     parts.push(`agent=${encodeURIComponent(context.agentAccount)}`);
   }
+  const gateway = context.gateway || defaultGateway.value;
+  const normalizedGateway = resolveGateway(gateway);
+  if (normalizedGateway) {
+    parts.push(`gateway=${encodeURIComponent(normalizedGateway)}`);
+  }
   return parts.join('&');
+}
+
+function resolveGateway(raw?: string | null): string {
+  if (!raw) {
+    return '';
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const lower = trimmed.toLowerCase();
+  if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+    return '';
+  }
+  return trimmed.replace(/\/+$/, '');
 }
 
 function decodeLegacySlug(slug: string): ActiveVerificationContext | null {
@@ -497,16 +772,18 @@ function decodeLegacySlug(slug: string): ActiveVerificationContext | null {
       ? new TextDecoder().decode(new Uint8Array(buffer))
       : utf8Decode(new Uint8Array(buffer));
     const raw = JSON.parse(json) ?? {};
-    const software = normalizeParam(raw.s || raw.software);
-    const softwareCode = normalizeParam(raw.c || raw.code);
-    const agentAccount = normalizeParam(raw.a || raw.agent);
+    const software = normalizeParam(raw.s || raw.software || raw.softwareName || raw.slot);
+    const softwareCode = normalizeParam(raw.c || raw.code || raw.softwareCode || raw.binding);
+    const agentAccount = normalizeParam(raw.a || raw.agent || raw.agentAccount);
+    const gateway = resolveGateway(normalizeParam(raw.g || raw.gateway));
     if (!software || !softwareCode) {
       return null;
     }
     return {
       software,
       softwareCode,
-      agentAccount: agentAccount || undefined
+      agentAccount: agentAccount || undefined,
+      gateway: gateway || undefined
     };
   } catch (error) {
     console.warn('Failed to decode legacy share slug', error);
@@ -514,20 +791,36 @@ function decodeLegacySlug(slug: string): ActiveVerificationContext | null {
   }
 }
 
-onLoad((options) => {
-  const query = resolveShareQuery(options);
-  if (!query) {
+onLoad(async (options) => {
+  shareOrigin.value = null;
+  shareQuery.value = '';
+  shareContextError.value = '';
+  linkContext.value = null;
+
+  const primaryDetection = buildShareCandidate(options);
+  let detection = primaryDetection;
+  if (!detection.detected) {
+    detection = await detectShareCandidateFromRoute();
+  }
+
+  if (!detection.detected) {
     return;
   }
-  const targetPath = `/pages/verify/share?${query}`;
-  if (isH5 && typeof window !== 'undefined' && window.location) {
-    const targetHash = `#${targetPath}`;
-    if (window.location.hash !== targetHash) {
-      window.location.replace(`${window.location.origin}/${targetHash}`);
+
+  shareOrigin.value = 'link';
+  shareContextError.value = '链接解析中，请稍候';
+
+  try {
+    const context = await resolveContextFromCandidate(detection.candidate);
+    if (context) {
+      applyLinkContext(context);
+    } else {
+      shareContextError.value = '链接信息缺失或已失效，请联系代理重新生成';
     }
-    return;
+  } catch (error) {
+    console.warn('Failed to resolve share link context', error);
+    shareContextError.value = '解析分享信息失败，请稍后再试';
   }
-  uni.redirectTo({ url: targetPath });
 });
 
 const statusStyle = computed(() => {
