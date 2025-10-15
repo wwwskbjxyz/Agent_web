@@ -67,6 +67,45 @@
             line-height: 1.6;
         }
 
+        .context-summary {
+            margin: 0 0 24px;
+            padding: 18px 20px;
+            border: 1px solid rgba(99, 102, 241, 0.18);
+            border-radius: 14px;
+            background: rgba(240, 244, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+            .context-summary.hidden {
+                display: none;
+            }
+
+        .summary-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            font-size: 15px;
+        }
+
+            .summary-row.hidden {
+                display: none;
+            }
+
+        .summary-label {
+            font-weight: 600;
+            color: #4f46e5;
+        }
+
+        .summary-value {
+            font-weight: 600;
+            color: #111827;
+            word-break: break-all;
+            text-align: right;
+        }
+
         form {
             display: flex;
             flex-direction: column;
@@ -327,6 +366,20 @@
     <main id="app-container" class="container">
         <h1>炫舞卡密验证与下载</h1>
         <p class="subtitle">验证您的卡密是否有效，并在验证通过后领取最新下载链接。</p>
+        <section id="context-summary" class="context-summary hidden">
+            <div class="summary-row">
+                <div class="summary-label">软件位</div>
+                <div id="summary-software" class="summary-value">-</div>
+            </div>
+            <div class="summary-row">
+                <div class="summary-label">软件码</div>
+                <div id="summary-code" class="summary-value">-</div>
+            </div>
+            <div id="summary-agent" class="summary-row hidden">
+                <div class="summary-label">所属代理</div>
+                <div id="summary-agent-value" class="summary-value">-</div>
+            </div>
+        </section>
         <form id="verify-form">
             <div>
                 <label for="card-key">卡密</label>
@@ -374,19 +427,39 @@
 
         const STORAGE_PREFIX = 'card-verify-history:';
         const submitButton = form.querySelector('button[type="submit"]');
+        const contextSummary = document.getElementById('context-summary');
+        const summarySoftwareEl = document.getElementById('summary-software');
+        const summaryCodeEl = document.getElementById('summary-code');
+        const summaryAgentRow = document.getElementById('summary-agent');
+        const summaryAgentValue = document.getElementById('summary-agent-value');
         let apiBase = '';
-        const shareContext = resolveShareContext();
-        if (shareContext && shareContext.gateway) {
-            apiBase = shareContext.gateway;
-        }
+        let shareContext = null;
 
         clearLegacyCache();
         enforceMobileExperience();
+        disableForm();
+        showStatus('正在解析链接，请稍候…', 'info');
 
-        if (!shareContext) {
-            showStatus('当前链接缺少软件信息，请联系代理重新生成。', 'error');
-            disableForm();
-        }
+        (async () => {
+            try {
+                shareContext = await resolveShareContext();
+                if (shareContext && shareContext.gateway) {
+                    apiBase = shareContext.gateway;
+                }
+
+                if (!shareContext) {
+                    showStatus('当前链接缺少软件信息，请联系代理重新生成。', 'error');
+                    return;
+                }
+
+                hydrateContextSummary(shareContext);
+                showStatus('请输入卡密后点击“验证并获取下载”。', 'info');
+                enableForm();
+            } catch (error) {
+                console.error('Failed to resolve share context', error);
+                showStatus('解析链接失败，请稍后重试。', 'error');
+            }
+        })();
 
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -474,7 +547,39 @@
             }
         }
 
-        function resolveShareContext() {
+        function enableForm() {
+            if (cardKeyInput) {
+                cardKeyInput.disabled = false;
+            }
+            if (submitButton) {
+                submitButton.disabled = false;
+            }
+        }
+
+        function hydrateContextSummary(context) {
+            if (!contextSummary) {
+                return;
+            }
+            contextSummary.classList.remove('hidden');
+            if (summarySoftwareEl) {
+                summarySoftwareEl.textContent = context.softwareDisplayName || context.software || '未提供';
+            }
+            if (summaryCodeEl) {
+                summaryCodeEl.textContent = context.softwareCode || '未提供';
+            }
+            if (summaryAgentRow && summaryAgentValue) {
+                const label = context.agentDisplayName || context.agentAccount || '';
+                if (label) {
+                    summaryAgentValue.textContent = label;
+                    summaryAgentRow.classList.remove('hidden');
+                } else {
+                    summaryAgentValue.textContent = '';
+                    summaryAgentRow.classList.add('hidden');
+                }
+            }
+        }
+
+        async function resolveShareContext() {
             const query = extractCombinedQuery();
             if (!query) {
                 return null;
@@ -484,32 +589,13 @@
             const shareSlug = decodeURIComponentSafe(map.share || '');
             if (shareSlug) {
                 const decoded = decodeShareSlug(shareSlug);
-                if (decoded) {
-                    if (decoded.gateway) {
-                        apiBase = decoded.gateway;
-                    }
-                    return decoded;
+                const resolved = await ensureShareContext(decoded);
+                if (resolved) {
+                    return resolved;
                 }
             }
 
-            const software = decodeURIComponentSafe(map.s || map.software || map.softwareName || map.slot || '');
-            const code = decodeURIComponentSafe(map.c || map.code || map.softwarecode || map.softwareCode || map.binding || '');
-            const agent = decodeURIComponentSafe(map.a || map.agent || map.agentAccount || '');
-            const gateway = resolveGateway(decodeURIComponentSafe(map.gateway || map.api || map.gw || ''));
-
-            if (software && code) {
-                if (gateway) {
-                    apiBase = gateway;
-                }
-                return {
-                    software,
-                    softwareCode: code,
-                    agentAccount: agent || undefined,
-                    gateway: gateway || undefined
-                };
-            }
-
-            return null;
+            return ensureShareContext(resolveContextFromMap(map));
         }
 
         function extractCombinedQuery() {
@@ -547,6 +633,78 @@
             return result;
         }
 
+        function resolveContextFromMap(map) {
+            if (!map) {
+                return null;
+            }
+
+            const software = decodeURIComponentSafe(map.s || map.software || map.softwareName || map.slot || '');
+            const code = decodeURIComponentSafe(map.c || map.code || map.softwarecode || map.softwareCode || map.binding || '');
+            const agent = decodeURIComponentSafe(map.a || map.agent || map.agentAccount || '');
+            const agentDisplay = decodeURIComponentSafe(
+                map.agentName || map.agentname || map.agentDisplay || map.agentdisplay || map.agentDisplayName || map.agentdisplayname || ''
+            );
+            const display = decodeURIComponentSafe(
+                map.display || map.softwareDisplay || map.softwaredisplay || map.softwareDisplayName || map.softwaredisplayname || map.name || ''
+            );
+            const gateway = resolveGateway(decodeURIComponentSafe(map.gateway || map.api || map.gw || ''));
+
+            if (!code) {
+                return null;
+            }
+
+            return {
+                software: sanitizeString(software) || undefined,
+                softwareCode: sanitizeString(code) || undefined,
+                agentAccount: sanitizeString(agent) || undefined,
+                agentDisplayName: sanitizeString(agentDisplay) || undefined,
+                softwareDisplayName: sanitizeString(display) || undefined,
+                gateway: gateway || undefined
+            };
+        }
+
+        async function ensureShareContext(candidate) {
+            if (!candidate) {
+                return null;
+            }
+
+            const gateway = resolveGateway(candidate.gateway || '');
+            const softwareCode = sanitizeString(candidate.softwareCode);
+            const software = sanitizeString(candidate.software);
+            const softwareDisplayName = sanitizeString(candidate.softwareDisplayName);
+            const agentAccount = sanitizeString(candidate.agentAccount);
+            const agentDisplayName = sanitizeString(candidate.agentDisplayName);
+
+            if (software && softwareCode) {
+                return {
+                    software,
+                    softwareCode,
+                    softwareDisplayName: softwareDisplayName || software,
+                    agentAccount: agentAccount || undefined,
+                    agentDisplayName: agentDisplayName || undefined,
+                    gateway: gateway || undefined
+                };
+            }
+
+            if (!softwareCode) {
+                return null;
+            }
+
+            const remote = await fetchShareContextByCode(softwareCode);
+            if (!remote || !remote.software || !remote.softwareCode) {
+                return null;
+            }
+
+            return {
+                software: remote.software,
+                softwareCode: remote.softwareCode,
+                softwareDisplayName: softwareDisplayName || remote.softwareDisplayName || remote.software,
+                agentAccount: agentAccount || remote.agentAccount || undefined,
+                agentDisplayName: agentDisplayName || remote.agentDisplayName || undefined,
+                gateway: gateway || undefined
+            };
+        }
+
         function decodeShareSlug(slug) {
             if (!slug) {
                 return null;
@@ -560,32 +718,91 @@
                 const bytes = base64ToBytes(base64);
                 const json = utf8Decode(bytes);
                 const payload = JSON.parse(json) || {};
-                const software = typeof payload.s === 'string'
-                    ? payload.s.trim()
-                    : (typeof payload.software === 'string' ? payload.software.trim() : '');
-                const code = typeof payload.c === 'string'
-                    ? payload.c.trim()
-                    : (typeof payload.code === 'string'
-                        ? payload.code.trim()
-                        : (typeof payload.softwareCode === 'string' ? payload.softwareCode.trim() : ''));
-                const agent = typeof payload.a === 'string'
-                    ? payload.a.trim()
-                    : (typeof payload.agent === 'string' ? payload.agent.trim() : '');
+                const software = sanitizeString(
+                    typeof payload.s === 'string'
+                        ? payload.s
+                        : (typeof payload.software === 'string' ? payload.software : payload.softwareName)
+                );
+                const code = sanitizeString(
+                    typeof payload.c === 'string'
+                        ? payload.c
+                        : (typeof payload.code === 'string'
+                            ? payload.code
+                            : (typeof payload.softwareCode === 'string' ? payload.softwareCode : payload.binding))
+                );
+                const agent = sanitizeString(
+                    typeof payload.a === 'string'
+                        ? payload.a
+                        : (typeof payload.agent === 'string' ? payload.agent : payload.agentAccount)
+                );
+                const agentDisplay = sanitizeString(
+                    typeof payload.agentDisplayName === 'string'
+                        ? payload.agentDisplayName
+                        : (typeof payload.agentDisplay === 'string'
+                            ? payload.agentDisplay
+                            : (typeof payload.agentName === 'string' ? payload.agentName : payload.an))
+                );
+                const display = sanitizeString(
+                    typeof payload.softwareDisplayName === 'string'
+                        ? payload.softwareDisplayName
+                        : (typeof payload.softwareDisplay === 'string'
+                            ? payload.softwareDisplay
+                            : (typeof payload.display === 'string' ? payload.display : payload.d))
+                );
                 const gateway = resolveGateway(typeof payload.g === 'string' ? payload.g.trim() : '');
-                if (!software || !code) {
+                if (!code) {
                     return null;
                 }
-                if (gateway) {
-                    apiBase = gateway;
-                }
                 return {
-                    software,
+                    software: software || undefined,
                     softwareCode: code,
                     agentAccount: agent || undefined,
+                    agentDisplayName: agentDisplay || undefined,
+                    softwareDisplayName: display || undefined,
                     gateway: gateway || undefined
                 };
             } catch (error) {
                 console.warn('Failed to decode share slug', error);
+                return null;
+            }
+        }
+
+        async function fetchShareContextByCode(code) {
+            const normalized = sanitizeString(code);
+            if (!normalized) {
+                return null;
+            }
+            const base = resolveGateway(apiBase || '') || '';
+            const endpoint = `${base}/api/card-verification/context?softwareCode=${encodeURIComponent(normalized)}`;
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                if (!response.ok) {
+                    return null;
+                }
+                const payload = await response.json();
+                if (!payload || typeof payload !== 'object' || payload.code !== 0) {
+                    return null;
+                }
+                const data = payload.data || {};
+                const software = sanitizeString(data.software);
+                const softwareCode = sanitizeString(data.softwareCode) || normalized;
+                if (!software) {
+                    return null;
+                }
+                return {
+                    software,
+                    softwareCode,
+                    softwareDisplayName: sanitizeString(data.softwareDisplayName) || undefined,
+                    agentAccount: sanitizeString(data.agentAccount) || undefined,
+                    agentDisplayName: sanitizeString(data.agentDisplayName) || undefined
+                };
+            } catch (error) {
+                console.warn('Failed to fetch share context', error);
                 return null;
             }
         }
@@ -603,6 +820,13 @@
                 return '';
             }
             return trimmed.replace(/\/+$/, '');
+        }
+
+        function sanitizeString(value) {
+            if (typeof value !== 'string') {
+                return '';
+            }
+            return value.trim();
         }
 
         function decodeURIComponentSafe(value) {

@@ -12,15 +12,15 @@
     <view class="context-card glass-card">
       <view class="context-row">
         <text class="context-label">软件位</text>
-        <text class="context-value">{{ software || '未提供' }}</text>
+        <text class="context-value">{{ softwareLabel || '未提供' }}</text>
       </view>
       <view class="context-row">
         <text class="context-label">软件码</text>
         <text class="context-value">{{ softwareCode || '未提供' }}</text>
       </view>
-      <view v-if="agentAccount" class="context-row">
+      <view v-if="agentLabel" class="context-row">
         <text class="context-label">所属代理</text>
-        <text class="context-value">{{ agentAccount }}</text>
+        <text class="context-value">{{ agentLabel }}</text>
       </view>
       <view v-if="contextError" class="context-warning">{{ contextError }}</view>
     </view>
@@ -99,12 +99,24 @@ import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import { storeToRefs } from 'pinia';
 import { useAppStore } from '@/stores/app';
-import { setBaseURL } from '@/common/api';
+import { apiRequest, setBaseURL } from '@/common/api';
+import type { CardVerificationShareContext } from '@/common/types';
 
 interface ShareContext {
   software: string;
   softwareCode: string;
   agentAccount?: string;
+  agentDisplayName?: string;
+  softwareDisplayName?: string;
+  gateway?: string;
+}
+
+interface PartialShareContext {
+  software?: string;
+  softwareCode?: string;
+  agentAccount?: string;
+  agentDisplayName?: string;
+  softwareDisplayName?: string;
   gateway?: string;
 }
 
@@ -116,14 +128,18 @@ const appStore = useAppStore();
 const { verification } = storeToRefs(appStore);
 
 const software = ref('');
+const softwareDisplayName = ref('');
 const softwareCode = ref('');
 const agentAccount = ref('');
+const agentDisplayName = ref('');
 const contextError = ref('');
 
 const cardKey = ref('');
 
 const loading = computed(() => appStore.loading.verification);
 const payload = computed(() => verification.value);
+const softwareLabel = computed(() => softwareDisplayName.value || software.value);
+const agentLabel = computed(() => agentDisplayName.value || agentAccount.value || '');
 const contextReady = computed(() => !!software.value && !!softwareCode.value);
 const canVerify = computed(() => contextReady.value && !!cardKey.value.trim() && !loading.value);
 
@@ -140,25 +156,43 @@ const statusStyle = computed(() => {
   }
 });
 
-onLoad((options) => {
-  const context = resolveContext(options);
-  if (context) {
-    software.value = context.software;
-    softwareCode.value = context.softwareCode;
-    agentAccount.value = context.agentAccount ?? '';
-    contextError.value = '';
-    verification.value = null;
-    if (context.gateway) {
-      setBaseURL(context.gateway);
+onLoad(async (options) => {
+  contextError.value = '链接解析中，请稍候';
+  resetContextState();
+  try {
+    const context = await resolveContext(options);
+    if (context) {
+      applyContext(context);
+    } else {
+      contextError.value = '链接信息缺失，请联系代理重新生成';
     }
-  } else {
-    software.value = '';
-    softwareCode.value = '';
-    agentAccount.value = '';
-    contextError.value = '链接信息缺失，请联系代理重新生成';
-    verification.value = null;
+  } catch (error) {
+    console.warn('Failed to resolve share context', error);
+    contextError.value = '解析链接信息失败，请稍后重试';
   }
 });
+
+function applyContext(context: ShareContext) {
+  software.value = context.software;
+  softwareDisplayName.value = context.softwareDisplayName || context.software;
+  softwareCode.value = context.softwareCode;
+  agentAccount.value = context.agentAccount ?? '';
+  agentDisplayName.value = context.agentDisplayName ?? '';
+  contextError.value = '';
+  verification.value = null;
+  if (context.gateway) {
+    setBaseURL(context.gateway);
+  }
+}
+
+function resetContextState() {
+  software.value = '';
+  softwareDisplayName.value = '';
+  softwareCode.value = '';
+  agentAccount.value = '';
+  agentDisplayName.value = '';
+  verification.value = null;
+}
 
 function handleVerify() {
   if (!cardKey.value.trim()) {
@@ -189,19 +223,68 @@ function copyUrl(url: string) {
   });
 }
 
-function resolveContext(options: Record<string, any> | undefined): ShareContext | null {
-  const primary = resolveFromOptions(options);
+async function resolveContext(options: Record<string, any> | undefined): Promise<ShareContext | null> {
+  const primary = await ensureContext(resolveFromOptions(options));
   if (primary) {
     return primary;
   }
-  const fallback = resolveFromRoute();
-  if (fallback) {
-    return fallback;
-  }
-  return null;
+  const fallback = await resolveFromRoute();
+  return ensureContext(fallback);
 }
 
-function resolveFromOptions(options: Record<string, any> | undefined): ShareContext | null {
+async function ensureContext(candidate: PartialShareContext | null | undefined): Promise<ShareContext | null> {
+  if (!candidate) {
+    return null;
+  }
+
+  const gatewayValue = resolveGateway(candidate.gateway ?? '');
+  const codeValue = sanitizeString(candidate.softwareCode);
+  const softwareValue = sanitizeString(candidate.software);
+  const displayValue = sanitizeString(candidate.softwareDisplayName);
+  const agentValue = sanitizeString(candidate.agentAccount);
+  const agentDisplayValue = sanitizeString(candidate.agentDisplayName);
+
+  if (softwareValue && codeValue) {
+    return {
+      software: softwareValue,
+      softwareCode: codeValue,
+      softwareDisplayName: displayValue || softwareValue,
+      agentAccount: agentValue || undefined,
+      agentDisplayName: agentDisplayValue || undefined,
+      gateway: gatewayValue || undefined
+    };
+  }
+
+  if (!codeValue) {
+    return null;
+  }
+
+  const remote = await fetchContextByCode(codeValue);
+  if (!remote) {
+    return null;
+  }
+
+  const remoteSoftware = sanitizeString(remote.software);
+  const remoteCode = sanitizeString(remote.softwareCode) || codeValue;
+  const remoteDisplay = sanitizeString(remote.softwareDisplayName);
+  const remoteAgent = sanitizeString(remote.agentAccount);
+  const remoteAgentDisplay = sanitizeString(remote.agentDisplayName);
+
+  if (!remoteSoftware) {
+    return null;
+  }
+
+  return {
+    software: remoteSoftware,
+    softwareCode: remoteCode,
+    softwareDisplayName: displayValue || remoteDisplay || remoteSoftware,
+    agentAccount: agentValue || remoteAgent || undefined,
+    agentDisplayName: agentDisplayValue || remoteAgentDisplay || undefined,
+    gateway: gatewayValue || undefined
+  };
+}
+
+function resolveFromOptions(options: Record<string, any> | undefined): PartialShareContext | null {
   if (!options) {
     return null;
   }
@@ -220,21 +303,29 @@ function resolveFromOptions(options: Record<string, any> | undefined): ShareCont
     options.c ?? options.code ?? options.softwareCode ?? options.binding
   );
   const agentValue = decodeComponent(options.a ?? options.agent ?? options.agentAccount);
+  const agentDisplayValue = decodeComponent(
+    options.agentName ?? options.agentDisplay ?? options.agentDisplayName
+  );
+  const displayValue = decodeComponent(
+    options.display ?? options.softwareDisplay ?? options.softwareDisplayName ?? options.name
+  );
   const gatewayValue = resolveGateway(decodeComponent(options.gateway ?? options.api ?? options.gw));
 
-  if (softwareValue && codeValue) {
-    return {
-      software: softwareValue,
-      softwareCode: codeValue,
-      agentAccount: agentValue || undefined,
-      gateway: gatewayValue || undefined
-    };
+  if (!codeValue) {
+    return null;
   }
 
-  return null;
+  return {
+    software: softwareValue || undefined,
+    softwareCode: codeValue,
+    agentAccount: agentValue || undefined,
+    agentDisplayName: agentDisplayValue || undefined,
+    softwareDisplayName: displayValue || undefined,
+    gateway: gatewayValue || undefined
+  };
 }
 
-function resolveFromRoute(): ShareContext | null {
+async function resolveFromRoute(): Promise<PartialShareContext | null> {
   if (typeof getCurrentPages !== 'function') {
     return null;
   }
@@ -267,19 +358,35 @@ function resolveFromRoute(): ShareContext | null {
       return decoded;
     }
   }
-  const softwareValue = map.s || map.software || map.softwarename || map.slot || '';
-  const codeValue = map.c || map.code || map.softwarecode || map.binding || '';
-  const agentValue = map.a || map.agent || map.agentaccount || '';
+  const softwareValue = decodeComponent(
+    map.s || map.software || map.softwarename || map.slot || ''
+  );
+  const codeValue = decodeComponent(
+    map.c || map.code || map.softwarecode || map.binding || ''
+  );
+  const agentValue = decodeComponent(
+    map.a || map.agent || map.agentaccount || ''
+  );
+  const agentDisplayValue = decodeComponent(
+    map.agentname || map.agentdisplay || map.agentdisplayname || ''
+  );
+  const displayValue = decodeComponent(
+    map.display || map.softwaredisplay || map.softwaredisplayname || map.name || ''
+  );
   const gatewayValue = resolveGateway(decodeComponent(map.gateway || map.api || map.gw));
-  if (softwareValue && codeValue) {
-    return {
-      software: decodeComponent(softwareValue),
-      softwareCode: decodeComponent(codeValue),
-      agentAccount: agentValue ? decodeComponent(agentValue) : undefined,
-      gateway: gatewayValue || undefined
-    };
+
+  if (!codeValue) {
+    return null;
   }
-  return null;
+
+  return {
+    software: softwareValue || undefined,
+    softwareCode: codeValue,
+    agentAccount: agentValue || undefined,
+    agentDisplayName: agentDisplayValue || undefined,
+    softwareDisplayName: displayValue || undefined,
+    gateway: gatewayValue || undefined
+  };
 }
 
 function sanitizeString(value: any): string {
@@ -317,7 +424,7 @@ function parseQuery(query: string): Record<string, string> {
   return map;
 }
 
-function decodeShareSlug(slug: string): ShareContext | null {
+function decodeShareSlug(slug: string): PartialShareContext | null {
   if (!slug) {
     return null;
   }
@@ -333,18 +440,55 @@ function decodeShareSlug(slug: string): ShareContext | null {
     const softwareValue = sanitizeString(raw.s ?? raw.software ?? raw.softwareName ?? raw.slot);
     const codeValue = sanitizeString(raw.c ?? raw.code ?? raw.softwareCode ?? raw.binding);
     const agentValue = sanitizeString(raw.a ?? raw.agent ?? raw.agentAccount);
+    const agentDisplayValue = sanitizeString(
+      raw.an ?? raw.agentName ?? raw.agentDisplay ?? raw.agentDisplayName
+    );
+    const displayValue = sanitizeString(
+      raw.d ?? raw.display ?? raw.softwareDisplay ?? raw.softwareDisplayName
+    );
     const gatewayValue = resolveGateway(sanitizeString(raw.g));
-    if (!softwareValue || !codeValue) {
+    if (!codeValue) {
       return null;
     }
     return {
-      software: softwareValue,
+      software: softwareValue || undefined,
       softwareCode: codeValue,
       agentAccount: agentValue || undefined,
+      agentDisplayName: agentDisplayValue || undefined,
+      softwareDisplayName: displayValue || undefined,
       gateway: gatewayValue || undefined
     };
   } catch (error) {
     console.warn('Failed to decode share slug', error);
+    return null;
+  }
+}
+
+async function fetchContextByCode(code: string): Promise<PartialShareContext | null> {
+  const normalized = sanitizeString(code);
+  if (!normalized) {
+    return null;
+  }
+  try {
+    const payload = await apiRequest<CardVerificationShareContext>({
+      url: '/api/card-verification/context',
+      method: 'GET',
+      data: { softwareCode: normalized },
+      skipProxy: true,
+      auth: false
+    });
+    if (!payload) {
+      return null;
+    }
+    return {
+      software: sanitizeString(payload.software) || undefined,
+      softwareCode: sanitizeString(payload.softwareCode) || normalized,
+      softwareDisplayName: sanitizeString(payload.softwareDisplayName) || undefined,
+      agentAccount: sanitizeString(payload.agentAccount) || undefined,
+      agentDisplayName: sanitizeString(payload.agentDisplayName) || undefined
+    };
+  } catch (error) {
+    console.warn('Failed to load verification context', error);
     return null;
   }
 }

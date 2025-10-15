@@ -11,6 +11,7 @@ public interface IAgentService
     Task<Agent?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default);
     Task<AgentAuthRecord?> GetAuthRecordByAccountAsync(string account, CancellationToken cancellationToken = default);
     Task<AgentAuthRecord?> GetAuthRecordByIdAsync(int id, CancellationToken cancellationToken = default);
+    Task<Agent?> GetByIdAsync(int id, CancellationToken cancellationToken = default);
     Task<Agent> CreateAsync(string username, string email, string passwordHash, string displayName, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
 }
@@ -70,6 +71,13 @@ public sealed class AgentService : IAgentService
         var sql = "SELECT CAST(Id AS SIGNED) AS Id, COALESCE(Username, Email) AS Username, Email, PasswordHash, DisplayName FROM Agents WHERE Id = @Id LIMIT 1";
         using var connection = await _connectionFactory.CreateConnectionAsync(cancellationToken);
         return await connection.QuerySingleOrDefaultAsync<AgentAuthRecord>(sql, new { Id = id });
+    }
+
+    public async Task<Agent?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var sql = $"SELECT {AgentSelectColumns} FROM Agents WHERE Id = @Id LIMIT 1";
+        using var connection = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        return await connection.QuerySingleOrDefaultAsync<Agent>(sql, new { Id = id });
     }
 
     public async Task<Agent> CreateAsync(string username, string email, string passwordHash, string displayName, CancellationToken cancellationToken = default)

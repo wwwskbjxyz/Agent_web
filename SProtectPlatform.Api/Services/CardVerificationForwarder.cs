@@ -82,11 +82,15 @@ public sealed class CardVerificationForwarder : ICardVerificationForwarder
             Path = "api/CardVerification/verify"
         }.Uri;
 
+        trimmedSoftware = string.IsNullOrWhiteSpace(trimmedSoftware)
+            ? (binding.SoftwareType?.Trim() ?? binding.SoftwareCode?.Trim() ?? trimmedCode)
+            : trimmedSoftware;
+
         var payload = new
         {
             cardKey = trimmedCardKey,
             software = trimmedSoftware,
-            softwareCode = binding.SoftwareCode,
+            softwareCode = binding.SoftwareCode?.Trim() ?? trimmedCode,
             agentAccount = string.IsNullOrWhiteSpace(request.AgentAccount)
                 ? null
                 : request.AgentAccount!.Trim()
