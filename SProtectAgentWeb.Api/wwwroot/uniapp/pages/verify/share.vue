@@ -99,11 +99,13 @@ import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import { storeToRefs } from 'pinia';
 import { useAppStore } from '@/stores/app';
+import { setBaseURL } from '@/common/api';
 
 interface ShareContext {
   software: string;
   softwareCode: string;
   agentAccount?: string;
+  gateway?: string;
 }
 
 declare const getCurrentPages: (() => Array<{ route?: string }>) | undefined;
@@ -146,6 +148,9 @@ onLoad((options) => {
     agentAccount.value = context.agentAccount ?? '';
     contextError.value = '';
     verification.value = null;
+    if (context.gateway) {
+      setBaseURL(context.gateway);
+    }
   } else {
     software.value = '';
     softwareCode.value = '';
@@ -211,12 +216,14 @@ function resolveFromOptions(options: Record<string, any> | undefined): ShareCont
   const softwareValue = decodeComponent(options.s ?? options.software);
   const codeValue = decodeComponent(options.c ?? options.code);
   const agentValue = decodeComponent(options.a ?? options.agent);
+  const gatewayValue = resolveGateway(decodeComponent(options.gateway ?? options.api ?? options.gw));
 
   if (softwareValue && codeValue) {
     return {
       software: softwareValue,
       softwareCode: codeValue,
-      agentAccount: agentValue || undefined
+      agentAccount: agentValue || undefined,
+      gateway: gatewayValue || undefined
     };
   }
 
@@ -259,11 +266,13 @@ function resolveFromRoute(): ShareContext | null {
   const softwareValue = map.s || map.software || '';
   const codeValue = map.c || map.code || '';
   const agentValue = map.a || map.agent || '';
+  const gatewayValue = resolveGateway(decodeComponent(map.gateway || map.api || map.gw));
   if (softwareValue && codeValue) {
     return {
       software: decodeComponent(softwareValue),
       softwareCode: decodeComponent(codeValue),
-      agentAccount: agentValue ? decodeComponent(agentValue) : undefined
+      agentAccount: agentValue ? decodeComponent(agentValue) : undefined,
+      gateway: gatewayValue || undefined
     };
   }
   return null;
@@ -320,18 +329,35 @@ function decodeShareSlug(slug: string): ShareContext | null {
     const softwareValue = sanitizeString(raw.s);
     const codeValue = sanitizeString(raw.c);
     const agentValue = sanitizeString(raw.a);
+    const gatewayValue = resolveGateway(sanitizeString(raw.g));
     if (!softwareValue || !codeValue) {
       return null;
     }
     return {
       software: softwareValue,
       softwareCode: codeValue,
-      agentAccount: agentValue || undefined
+      agentAccount: agentValue || undefined,
+      gateway: gatewayValue || undefined
     };
   } catch (error) {
     console.warn('Failed to decode share slug', error);
     return null;
   }
+}
+
+function resolveGateway(value: string): string {
+  if (!value) {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const lower = trimmed.toLowerCase();
+  if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+    return '';
+  }
+  return trimmed.replace(/\/+$/, '');
 }
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {

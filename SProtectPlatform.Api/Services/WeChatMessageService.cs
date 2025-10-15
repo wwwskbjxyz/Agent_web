@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -85,6 +86,16 @@ public sealed class WeChatMessageService : IWeChatMessageService
         }
 
         var payloadData = PreparePayloadData(templateKey, data, dynamicDefaults);
+
+        if (ShouldSuppressNotification(templateKey, data, dynamicDefaults, payloadData, out var suppression))
+        {
+            _logger.LogInformation(
+                "微信模板 {Template} 推送被跳过：{Reason}",
+                templateKey,
+                suppression?.ErrorMessage ?? "业务规则不满足");
+
+            return suppression ?? new WeChatNotificationResultDto(false, -10, "已跳过推送");
+        }
         if (payloadData.Count == 0)
         {
             return new WeChatNotificationResultDto(false, -4, "模板缺少有效数据，请检查配置");
@@ -231,6 +242,174 @@ public sealed class WeChatMessageService : IWeChatMessageService
         Merge(defaults, preferExisting: true);
 
         return sanitized;
+    }
+
+    private bool ShouldSuppressNotification(
+        string templateKey,
+        IReadOnlyDictionary<string, string> requestData,
+        IReadOnlyDictionary<string, string>? dynamicDefaults,
+        IReadOnlyDictionary<string, string> payloadData,
+        out WeChatNotificationResultDto? result)
+    {
+        result = null;
+
+        if (string.Equals(templateKey, WeChatTemplateKeys.BlacklistAlert, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!HasBlacklistPermission(requestData, dynamicDefaults))
+            {
+                result = new WeChatNotificationResultDto(false, -10, "当前账户无黑名单记录权限，已跳过推送");
+                return true;
+            }
+        }
+        else if (string.Equals(templateKey, WeChatTemplateKeys.SettlementNotice, StringComparison.OrdinalIgnoreCase))
+        {
+            if (IsZeroOrEmptyAmount(payloadData))
+            {
+                result = new WeChatNotificationResultDto(false, -11, "结算金额为 0，无需推送提醒");
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasBlacklistPermission(
+        IReadOnlyDictionary<string, string>? requestData,
+        IReadOnlyDictionary<string, string>? dynamicDefaults)
+    {
+        if (TryGetBooleanFlag(out var flag, requestData, dynamicDefaults, "hasBlacklistPermission", "blacklistPermission", "allowBlacklistPush", "allowBlacklistAlert"))
+        {
+            return flag;
+        }
+
+        return true;
+    }
+
+    private static bool IsZeroOrEmptyAmount(IReadOnlyDictionary<string, string> payloadData)
+    {
+        if (!TryGetValue(payloadData, "amount2", out var rawAmount))
+        {
+            return false;
+        }
+
+        var normalized = NormalizeAmount(rawAmount);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return true;
+        }
+
+        if (decimal.TryParse(normalized, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed == 0m;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeAmount(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            if (char.IsDigit(ch) || ch is '.' or ',')
+            {
+                if (ch != ',')
+                {
+                    builder.Append(ch);
+                }
+            }
+            else if (builder.Length == 0 && ch == '-')
+            {
+                builder.Append(ch);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool TryGetBooleanFlag(
+        out bool flag,
+        IReadOnlyDictionary<string, string>? primary,
+        IReadOnlyDictionary<string, string>? secondary,
+        params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (TryGetValue(primary, key, out var raw) || TryGetValue(secondary, key, out raw))
+            {
+                if (TryParseBoolean(raw, out flag))
+                {
+                    return true;
+                }
+            }
+        }
+
+        flag = false;
+        return false;
+    }
+
+    private static bool TryGetValue(
+        IReadOnlyDictionary<string, string>? source,
+        string key,
+        out string? value)
+    {
+        value = null;
+        if (source is null)
+        {
+            return false;
+        }
+
+        if (source.TryGetValue(key, out var direct))
+        {
+            value = direct;
+            return true;
+        }
+
+        foreach (var pair in source)
+        {
+            if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                value = pair.Value;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryParseBoolean(string? raw, out bool result)
+    {
+        result = false;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        var normalized = raw.Trim();
+        if (bool.TryParse(normalized, out result))
+        {
+            return true;
+        }
+
+        normalized = normalized.ToLowerInvariant();
+        if (normalized is "1" or "yes" or "y" or "on")
+        {
+            result = true;
+            return true;
+        }
+
+        if (normalized is "0" or "no" or "n" or "off")
+        {
+            result = false;
+            return true;
+        }
+
+        return false;
     }
 
     private static WeChatNotificationResultDto ParseSendResult(string responseContent)

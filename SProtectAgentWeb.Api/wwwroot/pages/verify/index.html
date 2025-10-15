@@ -374,7 +374,11 @@
 
         const STORAGE_PREFIX = 'card-verify-history:';
         const submitButton = form.querySelector('button[type="submit"]');
+        let apiBase = '';
         const shareContext = resolveShareContext();
+        if (shareContext && shareContext.gateway) {
+            apiBase = shareContext.gateway;
+        }
 
         clearLegacyCache();
         enforceMobileExperience();
@@ -481,6 +485,9 @@
             if (shareSlug) {
                 const decoded = decodeShareSlug(shareSlug);
                 if (decoded) {
+                    if (decoded.gateway) {
+                        apiBase = decoded.gateway;
+                    }
                     return decoded;
                 }
             }
@@ -488,12 +495,17 @@
             const software = decodeURIComponentSafe(map.s || map.software || '');
             const code = decodeURIComponentSafe(map.c || map.code || '');
             const agent = decodeURIComponentSafe(map.a || map.agent || '');
+            const gateway = resolveGateway(decodeURIComponentSafe(map.gateway || map.api || map.gw || ''));
 
             if (software && code) {
+                if (gateway) {
+                    apiBase = gateway;
+                }
                 return {
                     software,
                     softwareCode: code,
-                    agentAccount: agent || undefined
+                    agentAccount: agent || undefined,
+                    gateway: gateway || undefined
                 };
             }
 
@@ -551,18 +563,38 @@
                 const software = typeof payload.s === 'string' ? payload.s.trim() : '';
                 const code = typeof payload.c === 'string' ? payload.c.trim() : '';
                 const agent = typeof payload.a === 'string' ? payload.a.trim() : '';
+                const gateway = resolveGateway(typeof payload.g === 'string' ? payload.g.trim() : '');
                 if (!software || !code) {
                     return null;
+                }
+                if (gateway) {
+                    apiBase = gateway;
                 }
                 return {
                     software,
                     softwareCode: code,
-                    agentAccount: agent || undefined
+                    agentAccount: agent || undefined,
+                    gateway: gateway || undefined
                 };
             } catch (error) {
                 console.warn('Failed to decode share slug', error);
                 return null;
             }
+        }
+
+        function resolveGateway(value) {
+            if (!value) {
+                return '';
+            }
+            const trimmed = value.trim();
+            if (!trimmed) {
+                return '';
+            }
+            const lower = trimmed.toLowerCase();
+            if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+                return '';
+            }
+            return trimmed.replace(/\/+$/, '');
         }
 
         function decodeURIComponentSafe(value) {
@@ -622,6 +654,10 @@
         function buildVerificationEndpoint(context) {
             if (!context || !(context.softwareCode || '').trim()) {
                 throw new Error('缺少软件码');
+            }
+            const base = resolveGateway((context && context.gateway) || apiBase);
+            if (base) {
+                return `${base.replace(/\/+$/, '')}/api/card-verification/verify`;
             }
             return '/api/card-verification/verify';
         }

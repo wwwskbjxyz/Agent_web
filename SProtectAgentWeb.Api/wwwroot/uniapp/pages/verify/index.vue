@@ -416,6 +416,7 @@ function resolveShareQuery(options: Record<string, any> | undefined): string {
   const softwareValue = normalizeParam(options.software ?? options.s);
   const codeValue = normalizeParam(options.code ?? options.c);
   const agentValue = normalizeParam(options.agent ?? options.a);
+  const gatewayValue = resolveGateway(normalizeParam(options.gateway ?? options.api ?? options.gw));
 
   const parts: string[] = [];
   if (softwareValue) {
@@ -427,6 +428,10 @@ function resolveShareQuery(options: Record<string, any> | undefined): string {
   if (agentValue) {
     parts.push(`agent=${encodeURIComponent(agentValue)}`);
   }
+  if (gatewayValue) {
+    parts.push(`gateway=${encodeURIComponent(gatewayValue)}`);
+    defaultGateway.value = gatewayValue;
+  }
 
   if (parts.length >= 2) {
     return parts.join('&');
@@ -436,10 +441,15 @@ function resolveShareQuery(options: Record<string, any> | undefined): string {
   if (legacy) {
     const decoded = decodeLegacySlug(legacy);
     if (decoded?.software && decoded?.softwareCode) {
+      const normalizedGateway = resolveGateway(decoded.gateway);
+      if (normalizedGateway) {
+        defaultGateway.value = normalizedGateway;
+      }
       return buildShareQueryString({
         software: decoded.software,
         softwareCode: decoded.softwareCode,
-        agentAccount: decoded.agentAccount
+        agentAccount: decoded.agentAccount,
+        gateway: normalizedGateway || undefined
       });
     }
   }
@@ -462,7 +472,27 @@ function buildShareQueryString(context: ActiveVerificationContext): string {
   if (context.agentAccount) {
     parts.push(`agent=${encodeURIComponent(context.agentAccount)}`);
   }
+  const gateway = context.gateway || defaultGateway.value;
+  const normalizedGateway = resolveGateway(gateway);
+  if (normalizedGateway) {
+    parts.push(`gateway=${encodeURIComponent(normalizedGateway)}`);
+  }
   return parts.join('&');
+}
+
+function resolveGateway(raw?: string | null): string {
+  if (!raw) {
+    return '';
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const lower = trimmed.toLowerCase();
+  if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+    return '';
+  }
+  return trimmed.replace(/\/+$/, '');
 }
 
 function decodeLegacySlug(slug: string): ActiveVerificationContext | null {
@@ -500,13 +530,15 @@ function decodeLegacySlug(slug: string): ActiveVerificationContext | null {
     const software = normalizeParam(raw.s || raw.software);
     const softwareCode = normalizeParam(raw.c || raw.code);
     const agentAccount = normalizeParam(raw.a || raw.agent);
+    const gateway = resolveGateway(normalizeParam(raw.g || raw.gateway));
     if (!software || !softwareCode) {
       return null;
     }
     return {
       software,
       softwareCode,
-      agentAccount: agentAccount || undefined
+      agentAccount: agentAccount || undefined,
+      gateway: gateway || undefined
     };
   } catch (error) {
     console.warn('Failed to decode legacy share slug', error);
