@@ -97,7 +97,13 @@
       </template>
       <template #key="{ row }">
         <view class="key-header">
-          <text class="copy-text copyable" @longpress="copyValue(row.key)">{{ row.key }}</text>
+          <text
+            class="copy-text copyable"
+            @longpress="copyValue(row.key)"
+            @tap.stop="copyValue(row.key)"
+          >
+            {{ row.key }}
+          </text>
           <StatusTag :status="statusMap[row.status]" :label="row.statusText || statusText[row.status]" />
         </view>
       </template>
@@ -105,7 +111,13 @@
         <StatusTag :status="statusMap[row.status]" :label="row.statusText || statusText[row.status]" />
       </template>
       <template #ip="{ row }">
-        <text class="copy-text copyable" @longpress="copyValue(row.ip || '')">{{ row.ip || '—' }}</text>
+        <text
+          class="copy-text copyable"
+          @longpress="copyValue(row.ip || '')"
+          @tap.stop="copyValue(row.ip || '')"
+        >
+          {{ row.ip || '—' }}
+        </text>
       </template>
       <template #machineCodes="{ row }">
         <view v-if="row.machineCodes && row.machineCodes.length" class="machine-list">
@@ -114,6 +126,7 @@
             :key="code"
             class="machine-item copyable"
             @longpress="copyValue(code)"
+            @tap.stop="copyValue(code)"
           >
             {{ code }}
           </view>
@@ -125,7 +138,13 @@
         <text v-else class="placeholder">—</text>
       </template>
       <template #fullKey="{ row }">
-        <text class="full-key copyable" @longpress="copyValue(row.fullKey)">{{ row.fullKey }}</text>
+        <text
+          class="full-key copyable"
+          @longpress="copyValue(row.fullKey)"
+          @tap.stop="copyValue(row.fullKey)"
+        >
+          {{ row.fullKey }}
+        </text>
       </template>
       <template #operations="{ row }">
         <view class="action-group">
@@ -231,6 +250,7 @@
             :key="card"
             class="generated-item copyable"
             @longpress="copyValue(card)"
+            @tap.stop="copyValue(card)"
           >
             {{ card }}
           </view>

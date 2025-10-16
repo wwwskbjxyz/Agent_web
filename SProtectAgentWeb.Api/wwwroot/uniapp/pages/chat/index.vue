@@ -68,6 +68,7 @@
                   v-if="message.caption"
                   class="message-caption copyable"
                   @longpress="copyContent(message.caption)"
+                  @tap.stop="copyContent(message.caption)"
                 >
                   {{ message.caption }}
                 </text>
@@ -76,10 +77,17 @@
                 v-else
                 class="message-content copyable"
                 @longpress="copyContent(message.content)"
+                @tap.stop="copyContent(message.content)"
               >
                 {{ message.content }}
               </text>
-              <text class="message-time copyable" @longpress="copyContent(message.time)">{{ message.time }}</text>
+              <text
+                class="message-time copyable"
+                @longpress="copyContent(message.time)"
+                @tap.stop="copyContent(message.time)"
+              >
+                {{ message.time }}
+              </text>
             </view>
             <view v-if="loadingMessages" class="message-loading">消息加载中...</view>
           </scroll-view>

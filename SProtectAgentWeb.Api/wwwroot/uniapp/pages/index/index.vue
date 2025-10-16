@@ -260,16 +260,26 @@
             :key="`${item.card}-${item.activateTime}`"
             class="sales-entry glass-light"
           >
-            <view class="sales-field">
-              <text class="sales-label">卡密</text>
-              <text class="sales-value copyable" @longpress="copyValue(item.card)">{{ item.card }}</text>
-            </view>
-            <view class="sales-field">
-              <text class="sales-label">激活时间</text>
-              <text class="sales-value copyable" @longpress="copyValue(item.activateTime || '-')">
-                {{ item.activateTime || '-' }}
-              </text>
-            </view>
+          <view class="sales-field">
+            <text class="sales-label">卡密</text>
+            <text
+              class="sales-value copyable"
+              @longpress="copyValue(item.card)"
+              @tap.stop="copyValue(item.card)"
+            >
+              {{ item.card }}
+            </text>
+          </view>
+          <view class="sales-field">
+            <text class="sales-label">激活时间</text>
+            <text
+              class="sales-value copyable"
+              @longpress="copyValue(item.activateTime || '-')"
+              @tap.stop="copyValue(item.activateTime || '-')"
+            >
+              {{ item.activateTime || '-' }}
+            </text>
+          </view>
           </view>
           <view class="sales-pagination" v-if="salesTotalPages > 1">
             <view class="sales-page-info">第 {{ salesPage }} / {{ salesTotalPages }} 页</view>
