@@ -179,7 +179,7 @@ app.MapGet("/verify", context =>
     return Task.CompletedTask;
 });
 
-app.UseCors("AllowLocalhost");//¿çÓò
+app.UseCors("AllowLocalhost");
 
 if (app.Environment.IsDevelopment())
 {
@@ -193,7 +193,6 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
-app.UseStaticFiles();
 app.UseSession();
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseRouting();

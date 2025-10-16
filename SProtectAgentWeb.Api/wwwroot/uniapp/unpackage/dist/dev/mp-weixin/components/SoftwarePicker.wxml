@@ -1,0 +1,1 @@
+<view wx:if="{{a}}" class="software-picker data-v-167f4521"><picker class="data-v-167f4521" mode="selector" range="{{c}}" value="{{d}}" bindchange="{{e}}"><view class="picker-display data-v-167f4521"><text class="picker-label data-v-167f4521">{{b}}</text><text class="picker-arrow data-v-167f4521">▼</text></view></picker></view>

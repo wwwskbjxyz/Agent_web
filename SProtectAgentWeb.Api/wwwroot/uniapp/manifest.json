@@ -32,7 +32,9 @@
     "mp-weixin" : {
         "appid" : "wx7ed4ba8ed6e79312",
         "setting" : {
-            "urlCheck" : false
+            "urlCheck" : true,
+            "postcss" : true,
+            "minified" : true
         }
     },
     "platforms" : [ "app-plus", "h5", "mp-weixin" ],
