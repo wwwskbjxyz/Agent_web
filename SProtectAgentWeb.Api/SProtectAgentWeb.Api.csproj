@@ -29,10 +29,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Content Include="wwwroot/**/*.*">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-		</Content>
 		<Content Include="idc/**/*.*">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
@@ -51,7 +47,5 @@
           <Folder Include="idc\map_ip\" />
         </ItemGroup>
 
-        <ItemGroup>
-                <ProjectReference Include="..\SProtectPlatform.Api\SProtectPlatform.Api.csproj" />
-        </ItemGroup>
+        
 </Project>

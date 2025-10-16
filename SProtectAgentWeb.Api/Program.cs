@@ -84,15 +84,16 @@ builder.Services.AddSession(options =>
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowLocalhost",
+    options.AddPolicy("AllowAll",
         policy =>
         {
-            policy.WithOrigins("http://localhost:8080") // Ç°¶Ë HBuilderX ÔËÐÐµÄ¶Ë¿Ú
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
+            policy
+                .AllowAnyOrigin()      // 允许任何来源（包含任何域名和端口）
+                .AllowAnyHeader()      // 允许任何请求头
+                .AllowAnyMethod();     // 允许任何 HTTP 方法
         });
 });
+
 
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(appConfig.Jwt.Secret));
 

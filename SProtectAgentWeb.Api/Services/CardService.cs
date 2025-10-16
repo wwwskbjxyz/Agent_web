@@ -51,7 +51,7 @@ namespace SProtectAgentWeb.Api.Services
         private const long IpLocationCacheTtlSeconds = 24 * 60 * 60;
         private const int MaxImmediateIpResolutions = 50;
         private const int FailedIpRetryDelaySeconds = 90;
-        private const int ImmediateResolutionBatchSize = 100;
+        private const int ImmediateResolutionBatchSize = 35;
         private static readonly Func<string, Task<(string Province, string City, string District)>>[] IpResolvers =
         {
             QueryLocationFromPcOnlineAsync,

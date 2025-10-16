@@ -2,7 +2,7 @@
 const STORAGE_KEY = 'SProtect:apiBaseUrl';
 const STORAGE_VERSION_KEY = 'SProtect:apiBaseUrl:version';
 const STORAGE_VERSION = '2';
-const DEFAULT_BASE_URL = 'http://127.0.0.1:5050';
+const DEFAULT_BASE_URL = 'https://chen.roccloudiot.cn:5001';
 
 /**
  * 规范化 URL
