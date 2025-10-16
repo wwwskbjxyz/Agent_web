@@ -196,7 +196,13 @@ public sealed class UsageDistributionBackgroundService : BackgroundService
         var entries = new List<UsageDistributionCacheEntry>();
 
         var overall = await cardService
-            .ComputeUsageDistributionAsync(databasePath, creators: null, cancellationToken, software, allowBackgroundRefresh: false)
+            .ComputeUsageDistributionAsync(
+                databasePath,
+                creators: null,
+                cancellationToken,
+                software,
+                allowBackgroundRefresh: false,
+                maxImmediateResolutions: int.MaxValue)
             .ConfigureAwait(false);
         entries.Add(new UsageDistributionCacheEntry
         {
@@ -220,7 +226,13 @@ public sealed class UsageDistributionBackgroundService : BackgroundService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var response = await cardService
-                .ComputeUsageDistributionAsync(databasePath, new[] { creator! }, cancellationToken, software, allowBackgroundRefresh: false)
+                .ComputeUsageDistributionAsync(
+                    databasePath,
+                    new[] { creator! },
+                    cancellationToken,
+                    software,
+                    allowBackgroundRefresh: false,
+                    maxImmediateResolutions: int.MaxValue)
                 .ConfigureAwait(false);
             entries.Add(new UsageDistributionCacheEntry
             {

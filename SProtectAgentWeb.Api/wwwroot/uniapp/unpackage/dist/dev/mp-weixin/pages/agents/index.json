@@ -1,0 +1,10 @@
+{
+  "navigationBarTitleText": "代理管理",
+  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#05070f",
+  "usingComponents": {
+    "data-table": "../../components/DataTable",
+    "status-tag": "../../components/StatusTag",
+    "software-picker": "../../components/SoftwarePicker"
+  }
+}

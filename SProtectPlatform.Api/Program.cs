@@ -1,7 +1,9 @@
+using System;
+using System.IO;
 using System.Linq;
 using System.Text;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using SProtectPlatform.Api.Controllers;
 using SProtectPlatform.Api.Data;
@@ -15,6 +17,8 @@ builder.Services.Configure<MySqlOptions>(builder.Configuration.GetSection("MySql
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<EncryptionOptions>(builder.Configuration.GetSection("Encryption"));
 builder.Services.Configure<ForwardingOptions>(builder.Configuration.GetSection("Forwarding"));
+builder.Services.Configure<CorsSettings>(builder.Configuration.GetSection("Cors"));
+builder.Services.Configure<HttpsOptions>(builder.Configuration.GetSection("Https"));
 builder.Services.Configure<WeChatOptions>(builder.Configuration.GetSection("WeChat"));
 
 builder.Services.AddMemoryCache();
@@ -53,6 +57,7 @@ builder.Services.AddHttpClient(nameof(IWeChatMessageService), client =>
     client.DefaultRequestHeaders.UserAgent.Clear();
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) SProtectPlatform/1.0");
 });
+builder.Services.AddHttpClient(nameof(WeChatTemplateDataFactory));
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -80,6 +85,38 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+
+builder.WebHost.ConfigureKestrel((context, options) =>
+{
+    var httpsOptions = context.Configuration.GetSection("Https").Get<HttpsOptions>();
+    if (httpsOptions?.Enabled == true)
+    {
+        var httpPort = httpsOptions.HttpPort ?? 5000;
+        var httpsPort = httpsOptions.HttpsPort ?? 5001;
+
+        if (string.IsNullOrWhiteSpace(httpsOptions.CertificatePath))
+        {
+            throw new InvalidOperationException("HTTPS is enabled but no certificate path was provided.");
+        }
+
+        var certificatePath = httpsOptions.CertificatePath;
+        if (!Path.IsPathRooted(certificatePath))
+        {
+            certificatePath = Path.Combine(context.HostingEnvironment.ContentRootPath, certificatePath);
+        }
+
+        if (!File.Exists(certificatePath))
+        {
+            throw new InvalidOperationException($"HTTPS certificate not found at '{certificatePath}'.");
+        }
+
+        options.ListenAnyIP(httpPort);
+        options.ListenAnyIP(httpsPort, listenOptions =>
+        {
+            listenOptions.UseHttps(certificatePath, httpsOptions.CertificatePassword);
+        });
+    }
+});
 
 var app = builder.Build();
 

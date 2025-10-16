@@ -3,7 +3,9 @@ using System.Linq;
 using Dapper;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SProtectPlatform.Api.Data;
+using SProtectPlatform.Api.Options;
 
 namespace SProtectPlatform.Api.Services;
 
@@ -18,12 +20,18 @@ public sealed class CorsOriginService : ICorsOriginService
     private readonly IMySqlConnectionFactory _connectionFactory;
     private readonly IMemoryCache _cache;
     private readonly ILogger<CorsOriginService> _logger;
+    private readonly IOptionsMonitor<CorsSettings> _options;
 
-    public CorsOriginService(IMySqlConnectionFactory connectionFactory, IMemoryCache cache, ILogger<CorsOriginService> logger)
+    public CorsOriginService(
+        IMySqlConnectionFactory connectionFactory,
+        IMemoryCache cache,
+        ILogger<CorsOriginService> logger,
+        IOptionsMonitor<CorsSettings> options)
     {
         _connectionFactory = connectionFactory;
         _cache = cache;
         _logger = logger;
+        _options = options;
     }
 
     public async Task<IReadOnlyCollection<string>> GetAllowedOriginsAsync(CancellationToken cancellationToken = default)
@@ -46,8 +54,20 @@ public sealed class CorsOriginService : ICorsOriginService
         EnsureOrigin(origins, "http://127.0.0.1:8080");
         EnsureOrigin(origins, "https://127.0.0.1:8080");
 
+        var additionalOrigins = _options.CurrentValue.AdditionalOrigins;
+        if (additionalOrigins is { Length: > 0 })
+        {
+            foreach (var origin in additionalOrigins)
+            {
+                if (!string.IsNullOrWhiteSpace(origin))
+                {
+                    EnsureOrigin(origins, origin.Trim());
+                }
+            }
+        }
+
         _cache.Set("cors:origins", origins, CacheDuration);
-        _logger.LogDebug("Loaded {Count} allowed origins from database", origins.Count);
+        _logger.LogDebug("Loaded {Count} allowed origins from database and configuration", origins.Count);
         return origins;
     }
 

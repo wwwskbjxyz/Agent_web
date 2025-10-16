@@ -25,6 +25,7 @@ public sealed class SettlementController : ControllerBase
     private readonly SettlementLifecycleService _settlementLifecycleService;
     private readonly AgentService _agentService;
     private readonly PermissionHelper _permissionHelper;
+    private readonly CardService _cardService;
     private readonly ILogger<SettlementController> _logger;
 
     public SettlementController(
@@ -33,6 +34,7 @@ public sealed class SettlementController : ControllerBase
         SettlementLifecycleService settlementLifecycleService,
         AgentService agentService,
         PermissionHelper permissionHelper,
+        CardService cardService,
         ILogger<SettlementController> logger)
     {
         _sessionManager = sessionManager;
@@ -40,6 +42,7 @@ public sealed class SettlementController : ControllerBase
         _settlementLifecycleService = settlementLifecycleService;
         _agentService = agentService;
         _permissionHelper = permissionHelper;
+        _cardService = cardService;
         _logger = logger;
     }
 
@@ -89,6 +92,13 @@ public sealed class SettlementController : ControllerBase
             .GetReminderMapAsync(request.Software, agentsForReminder, agent.User, HttpContext.RequestAborted)
             .ConfigureAwait(false);
 
+        var billDtos = await BuildBillDtosAsync(
+                request.Software,
+                resolution.TargetAgent,
+                details.Bills,
+                HttpContext.RequestAborted)
+            .ConfigureAwait(false);
+
         var payload = new SettlementRateListResponse
         {
             TargetAgent = resolution.TargetAgent,
@@ -101,8 +111,8 @@ public sealed class SettlementController : ControllerBase
                 })
                 .ToList(),
             Cycle = ToCycleDto(details.Cycle),
-            Bills = details.Bills.Select(ToBillDto).ToList(),
-            HasPendingReminder = details.Cycle.IsDue
+            Bills = billDtos,
+            HasPendingReminder = billDtos.Any(bill => !bill.IsSettled)
         };
 
         return Ok(ApiResponse.Success(payload));
@@ -191,6 +201,13 @@ public sealed class SettlementController : ControllerBase
                     HttpContext.RequestAborted)
                 .ConfigureAwait(false);
 
+            var billDtos = await BuildBillDtosAsync(
+                    request.Software,
+                    resolution.TargetAgent,
+                    details.Bills,
+                    HttpContext.RequestAborted)
+                .ConfigureAwait(false);
+
             payload = new SettlementRateListResponse
             {
                 TargetAgent = resolution.TargetAgent,
@@ -203,8 +220,8 @@ public sealed class SettlementController : ControllerBase
                     .ToList(),
                 Agents = BuildAgentOptions(agent, resolution.TargetAgent, resolution.AccessibleAgents, reminderMap),
                 Cycle = ToCycleDto(details.Cycle),
-                Bills = details.Bills.Select(ToBillDto).ToList(),
-                HasPendingReminder = details.Cycle.IsDue
+                Bills = billDtos,
+                HasPendingReminder = billDtos.Any(bill => !bill.IsSettled)
             };
         }
         catch (Exception ex)
@@ -263,12 +280,19 @@ public sealed class SettlementController : ControllerBase
             .GetDetailsAsync(request.Software, resolution.TargetAgent, agent.User, HttpContext.RequestAborted)
             .ConfigureAwait(false);
 
+        var billDtos = await BuildBillDtosAsync(
+                request.Software,
+                resolution.TargetAgent,
+                details.Bills,
+                HttpContext.RequestAborted)
+            .ConfigureAwait(false);
+
         var response = new SettlementRateListResponse
         {
             TargetAgent = resolution.TargetAgent,
             Cycle = ToCycleDto(details.Cycle),
-            Bills = details.Bills.Select(ToBillDto).ToList(),
-            HasPendingReminder = details.Cycle.IsDue
+            Bills = billDtos,
+            HasPendingReminder = billDtos.Any(bill => !bill.IsSettled)
         };
 
         return Ok(ApiResponse.Success(response, "账单状态已更新"));
@@ -419,18 +443,6 @@ public sealed class SettlementController : ControllerBase
         return $"{hours:D2}:{mins:D2}";
     }
 
-    private static SettlementBillDto ToBillDto(SettlementBill bill)
-        => new()
-        {
-            Id = bill.Id,
-            CycleStartUtc = bill.CycleStartUtc.ToString("o"),
-            CycleEndUtc = bill.CycleEndUtc.ToString("o"),
-            Amount = bill.Amount,
-            IsSettled = bill.IsSettled,
-            SettledAtUtc = bill.SettledAtUtc?.ToString("o"),
-            Note = bill.Note
-        };
-
     private static IEnumerable<string> BuildReminderAgentList(string targetAgent, IReadOnlyList<Agent> accessibleAgents)
     {
         var list = new List<string> { targetAgent };
@@ -440,5 +452,288 @@ public sealed class SettlementController : ControllerBase
         }
 
         return list;
+    }
+
+    private async Task<IList<SettlementBillDto>> BuildBillDtosAsync(
+        string software,
+        string targetAgent,
+        IReadOnlyList<SettlementBill> bills,
+        CancellationToken cancellationToken)
+    {
+        if (bills is not { Count: > 0 })
+        {
+            return new List<SettlementBillDto>();
+        }
+
+        var agentMap = await BuildAgentMapAsync(software, targetAgent, cancellationToken).ConfigureAwait(false);
+        var directChildren = ResolveDirectChildren(agentMap, targetAgent);
+
+        var result = new List<SettlementBillDto>();
+        foreach (var bill in bills)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var breakdowns = await BuildBreakdownsForBillAsync(
+                    software,
+                    targetAgent,
+                    bill,
+                    agentMap,
+                    directChildren,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            var suggested = breakdowns.Sum(item => item.Amount);
+            var hasBreakdownValue = breakdowns.Any(item => item.Amount > 0m || item.Count > 0);
+            var hasValue = bill.IsSettled
+                ? (bill.Amount > 0m || (suggested > 0m && hasBreakdownValue))
+                : (suggested > 0m && hasBreakdownValue);
+
+            if (!hasValue)
+            {
+                continue;
+            }
+
+            var dto = new SettlementBillDto
+            {
+                Id = bill.Id,
+                CycleStartUtc = bill.CycleStartUtc.ToString("o"),
+                CycleEndUtc = bill.CycleEndUtc.ToString("o"),
+                Amount = bill.Amount,
+                SuggestedAmount = bill.IsSettled ? null : (suggested > 0m ? suggested : null),
+                IsSettled = bill.IsSettled,
+                SettledAtUtc = bill.SettledAtUtc?.ToString("o"),
+                Note = bill.Note,
+                Breakdowns = breakdowns
+            };
+
+            result.Add(dto);
+        }
+
+        return result;
+    }
+
+    private async Task<IReadOnlyDictionary<string, Agent>> BuildAgentMapAsync(
+        string software,
+        string targetAgent,
+        CancellationToken cancellationToken)
+    {
+        var map = new Dictionary<string, Agent>(StringComparer.OrdinalIgnoreCase);
+
+        var targetRecord = await _agentService.FindAgentAsync(software, targetAgent).ConfigureAwait(false);
+        if (targetRecord != null && !string.IsNullOrWhiteSpace(targetRecord.User))
+        {
+            map[targetRecord.User] = targetRecord;
+        }
+
+        var descendants = await _agentService
+            .GetAccessibleAgentsAsync(software, targetAgent, includeAllDescendants: true)
+            .ConfigureAwait(false);
+
+        foreach (var agent in descendants)
+        {
+            if (!string.IsNullOrWhiteSpace(agent.User))
+            {
+                map[agent.User] = agent;
+            }
+        }
+
+        return map;
+    }
+
+    private IDictionary<string, Agent> ResolveDirectChildren(
+        IReadOnlyDictionary<string, Agent> agentMap,
+        string targetAgent)
+    {
+        var direct = new Dictionary<string, Agent>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in agentMap)
+        {
+            var username = pair.Key;
+            if (string.Equals(username, targetAgent, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var directChild = ResolveDirectChild(username, targetAgent, agentMap);
+            if (string.IsNullOrWhiteSpace(directChild))
+            {
+                continue;
+            }
+
+            if (!direct.ContainsKey(directChild)
+                && agentMap.TryGetValue(directChild, out var agent))
+            {
+                direct[directChild] = agent;
+            }
+        }
+
+        return direct;
+    }
+
+    private async Task<List<SettlementBillBreakdownDto>> BuildBreakdownsForBillAsync(
+        string software,
+        string targetAgent,
+        SettlementBill bill,
+        IReadOnlyDictionary<string, Agent> agentMap,
+        IDictionary<string, Agent> directChildren,
+        CancellationToken cancellationToken)
+    {
+        var breakdowns = new List<SettlementBillBreakdownDto>();
+
+        var ownStats = await QuerySettlementStatsAsync(
+                software,
+                targetAgent,
+                targetAgent,
+                includeDescendants: false,
+                bill,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (ownStats.Amount > 0m || ownStats.Count > 0)
+        {
+            var display = FormatAgentDisplayName(agentMap.TryGetValue(targetAgent, out var agent) ? agent : null);
+            breakdowns.Add(new SettlementBillBreakdownDto
+            {
+                Agent = targetAgent,
+                DisplayName = display,
+                Amount = ownStats.Amount,
+                Count = ownStats.Count
+            });
+        }
+
+        foreach (var pair in directChildren.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var stats = await QuerySettlementStatsAsync(
+                    software,
+                    targetAgent,
+                    pair.Key,
+                    includeDescendants: true,
+                    bill,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (stats.Amount <= 0m && stats.Count <= 0)
+            {
+                continue;
+            }
+
+            breakdowns.Add(new SettlementBillBreakdownDto
+            {
+                Agent = pair.Key,
+                DisplayName = FormatAgentDisplayName(pair.Value),
+                Amount = stats.Amount,
+                Count = stats.Count
+            });
+        }
+
+        return breakdowns;
+    }
+
+    private async Task<(long Count, decimal Amount)> QuerySettlementStatsAsync(
+        string software,
+        string targetAgent,
+        string sourceAgent,
+        bool includeDescendants,
+        SettlementBill bill,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var start = ToUnixSeconds(bill.CycleStartUtc);
+            var rawEnd = ToUnixSeconds(bill.CycleEndUtc.AddSeconds(-1));
+            var end = rawEnd < start ? start : rawEnd;
+
+            var query = new ActivatedCardCountQuery
+            {
+                Software = software,
+                Status = "启用",
+                StartTime = start,
+                EndTime = end,
+                CurrentAgent = targetAgent,
+                WhomList = new List<string> { sourceAgent },
+                IncludeDescendants = includeDescendants
+            };
+
+            var response = await _cardService
+                .CountActivatedCardsAsync(query, cancellationToken)
+                .ConfigureAwait(false);
+
+            return (response?.Count ?? 0, response?.TotalAmount ?? 0m);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to build settlement breakdown for {Software}/{Agent} in bill {Bill}",
+                software,
+                sourceAgent,
+                bill.Id);
+            return (0, 0m);
+        }
+    }
+
+    private static long ToUnixSeconds(DateTime value)
+    {
+        var utc = value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+        };
+
+        return new DateTimeOffset(utc, TimeSpan.Zero).ToUnixTimeSeconds();
+    }
+
+    private string FormatAgentDisplayName(Agent? agent)
+    {
+        if (agent is null)
+        {
+            return string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(agent.Remarks))
+        {
+            return agent.User;
+        }
+
+        return $"{agent.User}（{agent.Remarks.Trim()}）";
+    }
+
+    private string? ResolveDirectChild(
+        string candidate,
+        string targetAgent,
+        IReadOnlyDictionary<string, Agent> agentMap)
+    {
+        if (string.Equals(candidate, targetAgent, StringComparison.OrdinalIgnoreCase))
+        {
+            return targetAgent;
+        }
+
+        var current = candidate?.Trim();
+        var normalizedTarget = targetAgent?.Trim() ?? string.Empty;
+
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (!agentMap.TryGetValue(current, out var info))
+            {
+                return null;
+            }
+
+            var parent = _permissionHelper.GetAgentParent(info.FNode);
+            if (string.IsNullOrWhiteSpace(parent))
+            {
+                return null;
+            }
+
+            if (parent.Equals(normalizedTarget, StringComparison.OrdinalIgnoreCase))
+            {
+                return current;
+            }
+
+            current = parent.Trim();
+        }
+
+        return null;
     }
 }

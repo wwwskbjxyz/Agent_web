@@ -1,7 +1,12 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -24,17 +29,29 @@ public sealed class WeChatTemplateDataFactory : IWeChatTemplateDataFactory
     private readonly IAgentService _agentService;
     private readonly IAuthorService _authorService;
     private readonly IBindingService _bindingService;
+    private readonly ICredentialProtector _credentialProtector;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<WeChatTemplateDataFactory> _logger;
+    private readonly ConcurrentDictionary<string, PermissionCacheEntry> _permissionCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public WeChatTemplateDataFactory(
         IAgentService agentService,
         IAuthorService authorService,
         IBindingService bindingService,
+        ICredentialProtector credentialProtector,
+        IHttpClientFactory httpClientFactory,
         ILogger<WeChatTemplateDataFactory> logger)
     {
         _agentService = agentService;
         _authorService = authorService;
         _bindingService = bindingService;
+        _credentialProtector = credentialProtector;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -133,16 +150,22 @@ public sealed class WeChatTemplateDataFactory : IWeChatTemplateDataFactory
         CancellationToken cancellationToken)
     {
         string? softwareName = null;
+        bool? hasPermission = null;
 
         if (string.Equals(userType, Roles.Agent, StringComparison.OrdinalIgnoreCase))
         {
             var binding = await GetPrimaryBindingForAgentAsync(userId, cancellationToken).ConfigureAwait(false);
             softwareName = Prefer(binding?.AuthorDisplayName, binding?.SoftwareCode);
+            if (binding != null)
+            {
+                hasPermission = await DetermineBlacklistPermissionAsync(binding, cancellationToken).ConfigureAwait(false);
+            }
         }
         else if (string.Equals(userType, Roles.Author, StringComparison.OrdinalIgnoreCase))
         {
             var author = await _authorService.GetByIdAsync(userId, cancellationToken).ConfigureAwait(false);
             softwareName = Prefer(author?.DisplayName, author?.SoftwareCode);
+            hasPermission = true;
         }
 
         var now = FormatDateTime(DateTimeOffset.UtcNow);
@@ -151,6 +174,11 @@ public sealed class WeChatTemplateDataFactory : IWeChatTemplateDataFactory
         if (!string.IsNullOrWhiteSpace(softwareName))
         {
             data.TryAdd("thing5", $"软件 {softwareName} 检测到新的黑名单异常，请尽快核查处理");
+        }
+
+        if (hasPermission.HasValue)
+        {
+            data["hasBlacklistPermission"] = hasPermission.Value ? "true" : "false";
         }
     }
 
@@ -213,6 +241,155 @@ public sealed class WeChatTemplateDataFactory : IWeChatTemplateDataFactory
         }
     }
 
+    private async Task<bool> DetermineBlacklistPermissionAsync(BindingRecord binding, CancellationToken cancellationToken)
+    {
+        var cacheKey = BuildPermissionCacheKey(binding);
+
+        if (_permissionCache.TryGetValue(cacheKey, out var cached))
+        {
+            if (cached.ExpiresAtUtc > DateTimeOffset.UtcNow)
+            {
+                return cached.IsSuper;
+            }
+
+            _permissionCache.TryRemove(cacheKey, out _);
+        }
+
+        var remoteResult = await CheckAuthorSuperAsync(binding, cancellationToken).ConfigureAwait(false);
+        var now = DateTimeOffset.UtcNow;
+        var ttl = remoteResult.HasValue
+            ? (remoteResult.Value ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(3))
+            : TimeSpan.FromSeconds(30);
+
+        var entry = new PermissionCacheEntry(remoteResult ?? false, now.Add(ttl));
+        _permissionCache[cacheKey] = entry;
+
+        return entry.IsSuper;
+    }
+
+    private async Task<bool?> CheckAuthorSuperAsync(BindingRecord binding, CancellationToken cancellationToken)
+    {
+        if (binding is null)
+        {
+            return null;
+        }
+
+        var username = binding.AuthorAccount?.Trim();
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return null;
+        }
+
+        string password;
+        try
+        {
+            password = _credentialProtector.Unprotect(binding.EncryptedAuthorPassword);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to decrypt author password for binding {BindingId} (software {SoftwareCode})",
+                binding.BindingId,
+                binding.SoftwareCode);
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            return null;
+        }
+
+        var host = binding.ApiAddress?.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+
+        var uriBuilder = new UriBuilder
+        {
+            Scheme = Uri.UriSchemeHttp,
+            Host = host,
+            Port = binding.ApiPort > 0 ? binding.ApiPort : -1,
+            Path = "api/Auth/login"
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, uriBuilder.Uri)
+        {
+            Content = JsonContent.Create(new RemoteLoginRequest(username, password), options: JsonOptions)
+        };
+
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("SProtectPlatform", "1.0"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        var client = _httpClientFactory.CreateClient(nameof(WeChatTemplateDataFactory));
+
+        try
+        {
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Blacklist permission probe failed with status {Status} for binding {BindingId} (software {SoftwareCode})",
+                    (int)response.StatusCode,
+                    binding.BindingId,
+                    binding.SoftwareCode);
+                return false;
+            }
+
+            RemoteApiResponse<RemoteLoginResponse>? envelope;
+            try
+            {
+                envelope = await response.Content
+                    .ReadFromJsonAsync<RemoteApiResponse<RemoteLoginResponse>>(JsonOptions, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to parse blacklist permission response for binding {BindingId} (software {SoftwareCode})",
+                    binding.BindingId,
+                    binding.SoftwareCode);
+                return null;
+            }
+
+            if (envelope is null)
+            {
+                return null;
+            }
+
+            if (envelope.Code != 0)
+            {
+                _logger.LogWarning(
+                    "Remote login rejected with code {Code} for binding {BindingId} (software {SoftwareCode})",
+                    envelope.Code,
+                    binding.BindingId,
+                    binding.SoftwareCode);
+                return false;
+            }
+
+            return envelope.Data?.IsSuper;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Exception occurred while probing blacklist permission for binding {BindingId} (software {SoftwareCode})",
+                binding.BindingId,
+                binding.SoftwareCode);
+            return null;
+        }
+    }
+
+    private static string BuildPermissionCacheKey(BindingRecord binding)
+    {
+        var account = binding.AuthorAccount?.Trim() ?? string.Empty;
+        var password = binding.EncryptedAuthorPassword ?? string.Empty;
+        var software = binding.SoftwareCode?.Trim() ?? string.Empty;
+        return string.Join("|", binding.BindingId, account, password, software);
+    }
+
     private async Task<BindingRecord?> GetPrimaryBindingForAgentAsync(int agentId, CancellationToken cancellationToken)
     {
         var bindings = await _bindingService.GetBindingsForAgentAsync(agentId, cancellationToken).ConfigureAwait(false);
@@ -230,4 +407,20 @@ public sealed class WeChatTemplateDataFactory : IWeChatTemplateDataFactory
 
     private static string FormatDate(DateTimeOffset value)
         => value.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private sealed record PermissionCacheEntry(bool IsSuper, DateTimeOffset ExpiresAtUtc);
+
+    private sealed record RemoteLoginRequest(string Username, string Password);
+
+    private sealed class RemoteLoginResponse
+    {
+        public bool IsSuper { get; set; }
+    }
+
+    private sealed class RemoteApiResponse<T>
+    {
+        public int Code { get; set; }
+        public string? Message { get; set; }
+        public T? Data { get; set; }
+    }
 }

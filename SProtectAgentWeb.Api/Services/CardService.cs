@@ -47,8 +47,11 @@ namespace SProtectAgentWeb.Api.Services
 
         private static readonly ConcurrentDictionary<string, CachedIpLocation> IpLocationCache = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, byte> BackgroundIpRefreshSet = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, long> FailedIpResolutionTimestamps = new(StringComparer.OrdinalIgnoreCase);
         private const long IpLocationCacheTtlSeconds = 24 * 60 * 60;
         private const int MaxImmediateIpResolutions = 50;
+        private const int FailedIpRetryDelaySeconds = 90;
+        private const int ImmediateResolutionBatchSize = 35;
         private static readonly Func<string, Task<(string Province, string City, string District)>>[] IpResolvers =
         {
             QueryLocationFromPcOnlineAsync,
@@ -974,7 +977,8 @@ namespace SProtectAgentWeb.Api.Services
             IEnumerable<string>? creators,
             CancellationToken cancellationToken,
             string? software = null,
-            bool allowBackgroundRefresh = true)
+            bool allowBackgroundRefresh = true,
+            int? maxImmediateResolutions = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -1028,10 +1032,14 @@ namespace SProtectAgentWeb.Api.Services
 
             if (ipIndexMap.Count > 0)
             {
+                var immediateLimit = maxImmediateResolutions.HasValue
+                    ? Math.Max(0, maxImmediateResolutions.Value)
+                    : MaxImmediateIpResolutions;
+
                 var ipLocations = await ResolveIpLocationsInternalAsync(
                     ipIndexMap.Keys,
                     software,
-                    MaxImmediateIpResolutions,
+                    immediateLimit,
                     scheduleBackground: allowBackgroundRefresh && !string.IsNullOrWhiteSpace(software),
                     cancellationToken).ConfigureAwait(false);
 
@@ -1394,6 +1402,8 @@ namespace SProtectAgentWeb.Api.Services
 
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             var pending = new List<string>();
+            var retryQueue = new List<string>();
+            var deferredQueue = new List<string>();
 
             foreach (var ip in distinctIps)
             {
@@ -1403,11 +1413,49 @@ namespace SProtectAgentWeb.Api.Services
                     continue;
                 }
 
+                if (FailedIpResolutionTimestamps.TryGetValue(ip, out var failedAt))
+                {
+                    if (now - failedAt < FailedIpRetryDelaySeconds)
+                    {
+                        if (scheduleBackground && !string.IsNullOrWhiteSpace(software))
+                        {
+                            retryQueue.Add(ip);
+                        }
+
+                        continue;
+                    }
+
+                    FailedIpResolutionTimestamps.TryRemove(ip, out _);
+                }
+
                 pending.Add(ip);
+            }
+
+            var cacheHitCount = distinctIps.Count - pending.Count;
+            if (cacheHitCount > 0)
+            {
+                _logger.LogInformation(
+                    "map_ip: 使用缓存命中 {CacheHits} 个 IP (软件: {Software})",
+                    cacheHitCount,
+                    string.IsNullOrWhiteSpace(software) ? "-" : software);
+            }
+
+            if (pending.Count > 0)
+            {
+                _logger.LogInformation(
+                    "map_ip: 收到 {PendingCount} 个 IP 待解析 (软件: {Software}, 即时解析上限: {Limit})",
+                    pending.Count,
+                    string.IsNullOrWhiteSpace(software) ? "-" : software,
+                    maxImmediateResolutions);
             }
 
             if (pending.Count == 0)
             {
+                if (scheduleBackground && retryQueue.Count > 0 && !string.IsNullOrWhiteSpace(software))
+                {
+                    QueueBackgroundIpResolution(software, retryQueue, TimeSpan.FromSeconds(FailedIpRetryDelaySeconds));
+                }
+
                 return results;
             }
 
@@ -1443,13 +1491,20 @@ namespace SProtectAgentWeb.Api.Services
             }
 
             var toResolve = pending.Where(ip => !results.ContainsKey(ip)).ToList();
-            var backgroundIps = new List<string>();
+            var dbHitCount = results.Count - cacheHitCount;
+            if (dbHitCount > 0)
+            {
+                _logger.LogInformation(
+                    "map_ip: 使用数据库命中 {DbHits} 个 IP (软件: {Software})",
+                    dbHitCount,
+                    string.IsNullOrWhiteSpace(software) ? "-" : software);
+            }
 
             if (toResolve.Count > 0 && maxImmediateResolutions >= 0 && toResolve.Count > maxImmediateResolutions)
             {
                 if (scheduleBackground && !string.IsNullOrWhiteSpace(software))
                 {
-                    backgroundIps = toResolve.Skip(maxImmediateResolutions).ToList();
+                    deferredQueue.AddRange(toResolve.Skip(maxImmediateResolutions));
                 }
 
                 toResolve = maxImmediateResolutions == 0
@@ -1457,21 +1512,85 @@ namespace SProtectAgentWeb.Api.Services
                     : toResolve.Take(maxImmediateResolutions).ToList();
             }
 
+            if (scheduleBackground && deferredQueue.Count > 0)
+            {
+                _logger.LogInformation(
+                    "map_ip: 延迟安排后台解析 {DeferredCount} 个 IP (软件: {Software})",
+                    deferredQueue.Count,
+                    string.IsNullOrWhiteSpace(software) ? "-" : software);
+            }
+
             if (toResolve.Count > 0)
             {
-                var resolutionTasks = toResolve
-                    .Select(ip => ResolveIpWithConcurrencyAsync(ip, expiredRecords.TryGetValue(ip, out var record) ? record : null))
-                    .ToList();
+                _logger.LogInformation(
+                    "map_ip: 即时解析 {ImmediateCount} 个 IP (软件: {Software})",
+                    toResolve.Count,
+                    string.IsNullOrWhiteSpace(software) ? "-" : software);
 
-                var resolvedResults = await Task.WhenAll(resolutionTasks).ConfigureAwait(false);
+                var resolvedResults = new List<IpResolutionResult>(toResolve.Count);
+                var totalCount = toResolve.Count;
+                var processedCount = 0;
+                var resolvedBeforeLoop = results.Count;
+                var totalWorkCount = resolvedBeforeLoop + totalCount;
+                var completedCount = resolvedBeforeLoop;
+
+                while (processedCount < totalCount)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var remaining = totalCount - processedCount;
+                    var batchCount = Math.Min(ImmediateResolutionBatchSize, remaining);
+                    var batch = toResolve.GetRange(processedCount, batchCount);
+                    var sampleIps = string.Join(", ", batch.Take(5));
+
+                    _logger.LogInformation(
+                        "map_ip: 正在解析 {BatchCount} 个 IP (软件: {Software}, 进度: {Processed}/{Total}, 示例: {SampleIps})",
+                        batch.Count,
+                        string.IsNullOrWhiteSpace(software) ? "-" : software,
+                        completedCount,
+                        totalWorkCount,
+                        string.IsNullOrEmpty(sampleIps) ? "-" : sampleIps);
+
+                    await Task.Yield();
+
+                    var resolutionTasks = batch
+                        .Select(ip => ResolveIpWithConcurrencyAsync(ip, expiredRecords.TryGetValue(ip, out var record) ? record : null))
+                        .ToList();
+
+                    var batchResults = await Task.WhenAll(resolutionTasks).ConfigureAwait(false);
+                    resolvedResults.AddRange(batchResults);
+                    processedCount += batch.Count;
+                    completedCount += batch.Count;
+
+                    _logger.LogInformation(
+                        "map_ip: 解析进度 {Processed}/{Total} (软件: {Software})",
+                        completedCount,
+                        totalWorkCount,
+                        string.IsNullOrWhiteSpace(software) ? "-" : software);
+                }
+
                 var upsertRecords = new List<IpLocationCacheEntry>();
 
                 foreach (var resolved in resolvedResults)
                 {
                     var ip = resolved.Ip;
+
+                    if (!resolved.HasLocation)
+                    {
+                        FailedIpResolutionTimestamps[ip] = resolved.UpdatedAt;
+
+                        if (scheduleBackground && !string.IsNullOrWhiteSpace(software))
+                        {
+                            retryQueue.Add(ip);
+                        }
+
+                        continue;
+                    }
+
                     var location = resolved.Location;
                     var updatedAt = resolved.UpdatedAt;
 
+                    FailedIpResolutionTimestamps.TryRemove(ip, out _);
                     results[ip] = location;
 
                     IpLocationCache[ip] = new CachedIpLocation
@@ -1498,15 +1617,23 @@ namespace SProtectAgentWeb.Api.Services
                 }
             }
 
-            if (scheduleBackground && backgroundIps.Count > 0 && !string.IsNullOrWhiteSpace(software))
+            if (scheduleBackground && !string.IsNullOrWhiteSpace(software))
             {
-                QueueBackgroundIpResolution(software, backgroundIps);
+                if (deferredQueue.Count > 0)
+                {
+                    QueueBackgroundIpResolution(software, deferredQueue);
+                }
+
+                if (retryQueue.Count > 0)
+                {
+                    QueueBackgroundIpResolution(software, retryQueue, TimeSpan.FromSeconds(FailedIpRetryDelaySeconds));
+                }
             }
 
             return results;
         }
 
-        private void QueueBackgroundIpResolution(string software, IList<string> ips)
+        private void QueueBackgroundIpResolution(string software, IList<string> ips, TimeSpan? delay = null)
         {
             var uniqueIps = ips
                 .Where(ip => !string.IsNullOrWhiteSpace(ip))
@@ -1519,11 +1646,32 @@ namespace SProtectAgentWeb.Api.Services
                 return;
             }
 
+            _logger.LogInformation(
+                "map_ip: 安排后台解析 {Count} 个 IP (软件: {Software}, 延迟: {DelaySeconds}s)",
+                uniqueIps.Count,
+                string.IsNullOrWhiteSpace(software) ? "-" : software,
+                delay.HasValue ? Math.Max(0, (int)delay.Value.TotalSeconds) : 0);
+
             _ = Task.Run(async () =>
             {
                 try
                 {
+                    if (delay.HasValue && delay.Value > TimeSpan.Zero)
+                    {
+                        await Task.Delay(delay.Value).ConfigureAwait(false);
+                    }
+
+                    _logger.LogInformation(
+                        "map_ip: 后台开始解析 {Count} 个 IP (软件: {Software})",
+                        uniqueIps.Count,
+                        string.IsNullOrWhiteSpace(software) ? "-" : software);
+
                     await ResolveIpLocationsInternalAsync(uniqueIps, null, int.MaxValue, scheduleBackground: false, CancellationToken.None);
+
+                    _logger.LogInformation(
+                        "map_ip: 后台解析完成 (软件: {Software}, 数量: {Count})",
+                        string.IsNullOrWhiteSpace(software) ? "-" : software,
+                        uniqueIps.Count);
                 }
                 catch (Exception ex)
                 {
@@ -1539,25 +1687,34 @@ namespace SProtectAgentWeb.Api.Services
             });
         }
 
-        private async Task<(string Ip, (string Province, string City, string District) Location, long UpdatedAt)> ResolveIpWithConcurrencyAsync(string ip, IpLocationCacheEntry? fallback)
+        private async Task<IpResolutionResult> ResolveIpWithConcurrencyAsync(string ip, IpLocationCacheEntry? fallback)
         {
             await IpResolverSemaphore.WaitAsync();
             try
             {
                 var location = await ResolveLocationWithResolversAsync(ip);
-                if (!HasLocation(location) && fallback != null)
+                var hasLocation = HasLocation(location);
+
+                if (!hasLocation && fallback != null)
                 {
                     location = NormalizeLocation(fallback.Province ?? string.Empty, fallback.City ?? string.Empty, fallback.District ?? string.Empty);
+                    hasLocation = HasLocation(location);
                 }
 
                 var updatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                return (ip, location, updatedAt);
+                return new IpResolutionResult(ip, location, updatedAt, hasLocation);
             }
             finally
             {
                 IpResolverSemaphore.Release();
             }
         }
+
+        private readonly record struct IpResolutionResult(
+            string Ip,
+            (string Province, string City, string District) Location,
+            long UpdatedAt,
+            bool HasLocation);
 
         private async Task<(string Province, string City, string District)> ResolveLocationWithResolversAsync(string ip)
         {

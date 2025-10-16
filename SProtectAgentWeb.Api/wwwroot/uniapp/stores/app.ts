@@ -231,6 +231,35 @@ function transformSalesResult(data?: any): SalesQueryResultPayload {
   };
 }
 
+function normalizeSettlementBill(raw: any): SettlementBillItem {
+  const breakdowns = ensureArray<any>(raw?.breakdowns)
+    .map((item) => ({
+      agent: (item?.agent ?? '').toString().trim(),
+      displayName: (item?.displayName ?? '').toString().trim(),
+      count: Number(item?.count ?? 0) || 0,
+      amount: Number(item?.amount ?? 0) || 0
+    }))
+    .filter((item) => item.agent.length > 0);
+
+  return {
+    id: Number(raw?.id ?? 0) || 0,
+    cycleStartUtc: (raw?.cycleStartUtc ?? '').toString(),
+    cycleEndUtc: (raw?.cycleEndUtc ?? '').toString(),
+    amount: Number(raw?.amount ?? 0) || 0,
+    suggestedAmount:
+      raw?.suggestedAmount == null
+        ? undefined
+        : (() => {
+            const value = Number(raw.suggestedAmount);
+            return Number.isFinite(value) && value > 0 ? value : undefined;
+          })(),
+    isSettled: Boolean(raw?.isSettled),
+    settledAtUtc: raw?.settledAtUtc ?? raw?.SettledAtUtc ?? null,
+    note: (raw?.note ?? '').toString() || null,
+    breakdowns
+  };
+}
+
 function transformBlacklistLog(raw: any): BlacklistLogItem {
   return {
     timestamp: formatDateTime(raw?.timestamp ?? raw?.Timestamp),
@@ -1241,7 +1270,7 @@ export const useAppStore = defineStore('app', () => {
       }
 
       settlementCycle.value = response?.cycle ?? null;
-      settlementBills.value = ensureArray<SettlementBillItem>(response?.bills);
+      settlementBills.value = ensureArray<any>(response?.bills).map(normalizeSettlementBill);
       settlementHasReminder.value = Boolean(response?.hasPendingReminder);
 
       const items = ensureArray<any>(response?.rates)
@@ -1314,7 +1343,7 @@ export const useAppStore = defineStore('app', () => {
       }
 
       settlementCycle.value = response?.cycle ?? settlementCycle.value;
-      settlementBills.value = ensureArray<SettlementBillItem>(response?.bills);
+      settlementBills.value = ensureArray<any>(response?.bills).map(normalizeSettlementBill);
       settlementHasReminder.value = Boolean(response?.hasPendingReminder);
 
       const saved = ensureArray<any>(response?.rates)
@@ -1356,7 +1385,7 @@ export const useAppStore = defineStore('app', () => {
     });
 
     settlementCycle.value = response?.cycle ?? settlementCycle.value;
-    settlementBills.value = ensureArray<SettlementBillItem>(response?.bills);
+    settlementBills.value = ensureArray<any>(response?.bills).map(normalizeSettlementBill);
     settlementHasReminder.value = Boolean(response?.hasPendingReminder);
 
     return settlementBills.value;

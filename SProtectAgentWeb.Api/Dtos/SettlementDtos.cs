@@ -149,11 +149,26 @@ public class SettlementBillDto
 
     public decimal Amount { get; set; }
 
+    public decimal? SuggestedAmount { get; set; }
+
     public bool IsSettled { get; set; }
 
     public string? SettledAtUtc { get; set; }
 
     public string? Note { get; set; }
+
+    public IList<SettlementBillBreakdownDto> Breakdowns { get; set; } = new List<SettlementBillBreakdownDto>();
+}
+
+public class SettlementBillBreakdownDto
+{
+    public string Agent { get; set; } = string.Empty;
+
+    public string DisplayName { get; set; } = string.Empty;
+
+    public long Count { get; set; }
+
+    public decimal Amount { get; set; }
 }
 
 public class SettlementBillCompleteRequest

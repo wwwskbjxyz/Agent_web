@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "联动记录",
+  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#05070f",
+  "usingComponents": {
+    "data-table": "../../components/DataTable",
+    "software-picker": "../../components/SoftwarePicker"
+  }
+}

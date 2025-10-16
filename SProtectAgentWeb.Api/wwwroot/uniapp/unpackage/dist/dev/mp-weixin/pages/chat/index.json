@@ -1,0 +1,8 @@
+{
+  "navigationBarTitleText": "即时沟通",
+  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#05070f",
+  "usingComponents": {
+    "software-picker": "../../components/SoftwarePicker"
+  }
+}
