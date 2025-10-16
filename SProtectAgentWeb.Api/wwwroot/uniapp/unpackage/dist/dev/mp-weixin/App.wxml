@@ -1,1 +1,0 @@
-<page-meta page-style="{{a}}"/><view class="{{['app-container', b]}}" style="{{c}}"><slot/></view>

@@ -1,0 +1,41 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36414.22 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sp_sqlite_bridge", "test64\test64.vcxproj", "{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SPCloud_2019", "服务端云插件源码\SPCloud_2019\SPCloud_2019.vcxproj", "{AB203A53-7D52-4C5B-B003-F30C117D9B3F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Debug|x64 = Debug|x64
+		Release|Win32 = Release|Win32
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}.Debug|Win32.ActiveCfg = Debug|Win32
+		{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}.Debug|Win32.Build.0 = Debug|Win32
+		{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}.Debug|x64.ActiveCfg = Debug|x64
+		{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}.Debug|x64.Build.0 = Debug|x64
+		{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}.Release|Win32.ActiveCfg = Release|Win32
+		{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}.Release|Win32.Build.0 = Release|Win32
+		{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}.Release|x64.ActiveCfg = Release|x64
+		{B6DF0FB4-AF56-4FD6-A79B-A459712ECAF6}.Release|x64.Build.0 = Release|x64
+		{AB203A53-7D52-4C5B-B003-F30C117D9B3F}.Debug|Win32.ActiveCfg = Debug|Win32
+		{AB203A53-7D52-4C5B-B003-F30C117D9B3F}.Debug|Win32.Build.0 = Debug|Win32
+		{AB203A53-7D52-4C5B-B003-F30C117D9B3F}.Debug|x64.ActiveCfg = Debug|Win32
+		{AB203A53-7D52-4C5B-B003-F30C117D9B3F}.Debug|x64.Build.0 = Debug|Win32
+		{AB203A53-7D52-4C5B-B003-F30C117D9B3F}.Release|Win32.ActiveCfg = Release|Win32
+		{AB203A53-7D52-4C5B-B003-F30C117D9B3F}.Release|Win32.Build.0 = Release|Win32
+		{AB203A53-7D52-4C5B-B003-F30C117D9B3F}.Release|x64.ActiveCfg = Release|Win32
+		{AB203A53-7D52-4C5B-B003-F30C117D9B3F}.Release|x64.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {B72264DE-318F-42E0-B60F-72BEBA2BD5A6}
+	EndGlobalSection
+EndGlobal
