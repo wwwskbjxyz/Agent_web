@@ -29,12 +29,12 @@ $gradient-hero: radial-gradient(circle at top, rgba(56, 189, 248, 0.28), transpa
   --color-dark: #0b1220;
   --color-darker: #0a0f1a;
   --color-text: #d1d5db;
-  --app-background: radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 65%),
-    radial-gradient(circle at bottom, rgba(99, 102, 241, 0.15), transparent 60%),
-    #05070f;
-  --card-background: rgba(15, 23, 42, 0.72);
-  --card-border: rgba(108, 92, 231, 0.25);
-  --surface-light: rgba(12, 19, 33, 0.55);
+  --app-background: linear-gradient(160deg, #01040c 0%, #050a16 50%, #0b1220 100%),
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.16), transparent 60%),
+    radial-gradient(circle at bottom, rgba(99, 102, 241, 0.12), transparent 65%);
+  --card-background: rgba(18, 26, 45, 0.92);
+  --card-border: rgba(59, 130, 246, 0.32);
+  --surface-light: rgba(23, 34, 58, 0.78);
   --text-primary: #f8fafc;
   --text-secondary: rgba(226, 232, 240, 0.78);
   --text-muted: rgba(148, 163, 184, 0.75);
@@ -105,11 +105,13 @@ page {
 .glass-card {
   background: $card-background;
   background: var(--card-background);
+  background-image: linear-gradient(135deg, rgba(59, 130, 246, 0.08), transparent);
+  background-blend-mode: screen;
   border-radius: $radius-large;
   border: 1px solid $card-border;
   border: 1px solid var(--card-border);
   backdrop-filter: blur(24rpx);
-  box-shadow: $shadow-panel;
+  box-shadow: 0 20rpx 60rpx rgba(4, 12, 27, 0.55);
 }
 
 .glass-light {
@@ -119,6 +121,7 @@ page {
   border: 1px solid $outline-color;
   border: 1px solid var(--outline-color);
   backdrop-filter: blur(12rpx);
+  box-shadow: 0 12rpx 40rpx rgba(5, 15, 35, 0.4);
 }
 
 .copyable,

@@ -55,7 +55,13 @@
     >
       <template #username="{ row }">
         <view class="agent-header">
-          <text class="agent-name copyable" @longpress="copyValue(row.username)">{{ row.username }}</text>
+          <text
+            class="agent-name copyable"
+            @longpress="copyValue(row.username)"
+            @tap.stop="copyValue(row.username)"
+          >
+            {{ row.username }}
+          </text>
           <StatusTag :status="statusMap[row.status]" :label="statusText[row.status]" />
         </view>
       </template>
