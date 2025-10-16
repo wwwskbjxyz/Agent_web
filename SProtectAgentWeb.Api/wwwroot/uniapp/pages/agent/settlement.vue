@@ -126,13 +126,29 @@
               <text class="bill-label">结算周期</text>
               <text class="bill-value">{{ formatDateTimeDisplay(bill.cycleStartUtc) }} ~ {{ formatDateTimeDisplay(bill.cycleEndUtc) }}</text>
             </view>
+            <view v-if="hasBreakdown(bill)" class="bill-breakdown">
+              <view class="breakdown-header">
+                <text class="bill-label">结算明细</text>
+                <text class="bill-subtotal">建议金额：￥{{ formatCurrency(bill.suggestedAmount ?? bill.amount) }}</text>
+              </view>
+              <view v-for="item in bill.breakdowns" :key="`${bill.id}-${item.agent}`" class="breakdown-row">
+                <text class="breakdown-agent">{{ item.displayName || item.agent }}</text>
+                <text class="breakdown-count">{{ item.count }} 张</text>
+                <text class="breakdown-amount">￥{{ formatCurrency(item.amount) }}</text>
+              </view>
+            </view>
+            <view v-else class="bill-row subtle">
+              <text class="bill-label">结算明细</text>
+              <text class="bill-value">当前周期无待结算数据</text>
+            </view>
             <view class="bill-row">
               <text class="bill-label">结算金额</text>
               <input
                 class="bill-input"
                 type="digit"
                 v-model="billAmountEdits[bill.id]"
-                :placeholder="'0.00'"
+                :placeholder="bill.suggestedAmount ? formatCurrency(bill.suggestedAmount) : '0.00'"
+                :disabled="!hasBreakdown(bill)"
               />
             </view>
             <view class="bill-row">
@@ -144,7 +160,7 @@
                 placeholder="备注信息（可选）"
               />
             </view>
-            <button class="btn primary" :disabled="savingRates" @tap="confirmBill(bill.id)">确认已结算</button>
+            <button class="btn primary" :disabled="savingRates || !hasBreakdown(bill)" @tap="confirmBill(bill.id)">确认已结算</button>
           </view>
           <view v-for="bill in settledBills" :key="`settled-${bill.id}`" class="bill-card settled">
             <view class="bill-row">
@@ -154,6 +170,16 @@
             <view class="bill-row">
               <text class="bill-label">结算金额</text>
               <text class="bill-value emphasis">￥{{ formatCurrency(bill.amount) }}</text>
+            </view>
+            <view v-if="bill.breakdowns?.length" class="bill-breakdown settled">
+              <view class="breakdown-header">
+                <text class="bill-label">结算明细</text>
+              </view>
+              <view v-for="item in bill.breakdowns" :key="`${bill.id}-${item.agent}`" class="breakdown-row">
+                <text class="breakdown-agent">{{ item.displayName || item.agent }}</text>
+                <text class="breakdown-count">{{ item.count }} 张</text>
+                <text class="breakdown-amount">￥{{ formatCurrency(item.amount) }}</text>
+              </view>
             </view>
             <view class="bill-row">
               <text class="bill-label">结算时间</text>
@@ -180,7 +206,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAppStore } from '@/stores/app';
 import { usePlatformStore } from '@/stores/platform';
-import type { CardTypeInfo, SettlementRateItem } from '@/common/types';
+import type { CardTypeInfo, SettlementRateItem, SettlementBillItem } from '@/common/types';
 
 interface EditableRate {
   cardType: string;
@@ -271,6 +297,10 @@ const cycleTimePlaceholder = computed(() => {
 const pendingBills = computed(() => settlementBills.value.filter((bill) => !bill.isSettled));
 const settledBills = computed(() => settlementBills.value.filter((bill) => bill.isSettled));
 
+function hasBreakdown(bill: SettlementBillItem) {
+  return Array.isArray(bill?.breakdowns) && bill.breakdowns.length > 0;
+}
+
 watch(
   agentOptions,
   async (options) => {
@@ -316,12 +346,29 @@ watch(
 watch(
   pendingBills,
   (bills) => {
+    const activeIds = new Set<number>();
     bills.forEach((bill) => {
-      if (!billAmountEdits[bill.id]) {
-        billAmountEdits[bill.id] = formatCurrency(bill.amount);
+      activeIds.add(bill.id);
+      const suggested = formatAmountInput(bill.suggestedAmount ?? bill.amount);
+      if (!billAmountEdits[bill.id] || billAmountEdits[bill.id] === '0' || billAmountEdits[bill.id] === '0.00') {
+        billAmountEdits[bill.id] = suggested;
       }
       if (bill.note && !billNoteEdits[bill.id]) {
         billNoteEdits[bill.id] = bill.note;
+      }
+    });
+
+    Object.keys(billAmountEdits).forEach((key) => {
+      const id = Number(key);
+      if (!Number.isFinite(id) || !activeIds.has(id)) {
+        delete billAmountEdits[id];
+      }
+    });
+
+    Object.keys(billNoteEdits).forEach((key) => {
+      const id = Number(key);
+      if (!Number.isFinite(id) || !activeIds.has(id)) {
+        delete billNoteEdits[id];
       }
     });
   },
@@ -409,6 +456,17 @@ function formatCurrency(value: number | string) {
     return '0.00';
   }
   return amount.toFixed(2);
+}
+
+function formatAmountInput(value?: number | null) {
+  if (value == null) {
+    return '';
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '';
+  }
+  return formatCurrency(numeric);
 }
 
 function normalizePrice(item: EditableRate) {
@@ -530,7 +588,12 @@ async function save() {
 
 async function confirmBill(billId: number) {
   const rawAmount = billAmountEdits[billId] ?? '0';
-  const amount = Number(rawAmount);
+  let amount = Number(rawAmount);
+  const bill = pendingBills.value.find((item) => item.id === billId);
+  if ((!Number.isFinite(amount) || amount <= 0) && bill && Number(bill.suggestedAmount ?? 0) > 0) {
+    amount = Number(bill.suggestedAmount);
+  }
+
   if (!Number.isFinite(amount) || amount < 0) {
     uni.showToast({ title: '请输入有效金额', icon: 'none' });
     return;
@@ -806,6 +869,63 @@ onMounted(() => {
   border: 1px solid rgba(94, 234, 212, 0.3);
   background: rgba(15, 23, 42, 0.55);
   color: rgba(226, 232, 240, 0.95);
+}
+
+.bill-row.subtle .bill-value {
+  color: rgba(148, 163, 184, 0.75);
+}
+
+.bill-breakdown {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16rpx;
+  padding: 16rpx 20rpx;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.bill-breakdown.settled {
+  border-color: rgba(94, 234, 212, 0.25);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.breakdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 26rpx;
+}
+
+.bill-subtotal {
+  color: rgba(94, 234, 212, 0.85);
+  font-weight: 600;
+}
+
+.breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  font-size: 26rpx;
+}
+
+.breakdown-agent {
+  flex: 1;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.breakdown-count {
+  color: rgba(148, 163, 184, 0.8);
+  min-width: 120rpx;
+  text-align: right;
+}
+
+.breakdown-amount {
+  min-width: 160rpx;
+  text-align: right;
+  color: rgba(94, 234, 212, 0.9);
+  font-weight: 600;
 }
 
 .selector-value.disabled {

@@ -172,21 +172,44 @@ public sealed class LanzouLinkService
     private async Task<IReadOnlyList<LanzouLinkInfo>> LoadAvailableLinksAsync(MySqlConnection connection, string table, CancellationToken cancellationToken)
     {
         table = EnsureSafeTableName(table);
-        var sql = $"SELECT id, `链接` AS LinkContent, `创建时间` AS CreatedAt FROM {table}";
-        await using var command = new MySqlCommand(sql, connection);
 
-        var rows = new List<LanzouLinkRow>();
-        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        async Task<List<LanzouLinkRow>> ExecuteAsync(bool includeExtractionColumn)
         {
-            var row = new LanzouLinkRow
-            {
-                Id = reader.IsDBNull(0) ? 0 : reader.GetInt64(0),
-                LinkContent = reader.IsDBNull(1) ? null : reader.GetString(1),
-                CreatedAt = reader.IsDBNull(2) ? (DateTime?)null : reader.GetDateTime(2)
-            };
+            var projection = includeExtractionColumn
+                ? "id, `链接` AS LinkContent, `创建时间` AS CreatedAt, `提取码` AS ExtractionCode"
+                : "id, `链接` AS LinkContent, `创建时间` AS CreatedAt";
+            var sql = $"SELECT {projection} FROM {table}";
+            await using var command = new MySqlCommand(sql, connection);
 
-            rows.Add(row);
+            var rows = new List<LanzouLinkRow>();
+            await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var row = new LanzouLinkRow
+                {
+                    Id = reader.IsDBNull(0) ? 0 : reader.GetInt64(0),
+                    LinkContent = reader.IsDBNull(1) ? null : reader.GetString(1),
+                    CreatedAt = reader.IsDBNull(2) ? (DateTime?)null : reader.GetDateTime(2),
+                    ExtractionCode = includeExtractionColumn && reader.FieldCount > 3 && !reader.IsDBNull(3)
+                        ? reader.GetString(3)
+                        : null
+                };
+
+                rows.Add(row);
+            }
+
+            return rows;
+        }
+
+        List<LanzouLinkRow> rows;
+        try
+        {
+            rows = await ExecuteAsync(includeExtractionColumn: true).ConfigureAwait(false);
+        }
+        catch (MySqlException ex) when (ex.Number == (int)MySqlErrorCode.BadFieldError)
+        {
+            _logger.LogDebug(ex, "Link table {Table} does not expose a 提取码 column; falling back to raw content parsing.", table);
+            rows = await ExecuteAsync(includeExtractionColumn: false).ConfigureAwait(false);
         }
 
         return rows
@@ -243,11 +266,14 @@ public sealed class LanzouLinkService
 
         var limitIndex = parameterDefinitions.Count;
         var offsetIndex = parameterDefinitions.Count + 1;
-        var dataSql = $"SELECT id, `链接` AS LinkContent, `创建时间` AS CreatedAt FROM {table} {whereBuilder} ORDER BY id DESC LIMIT @p{limitIndex} OFFSET @p{offsetIndex}";
-
-        var items = new List<LanzouLinkRecord>();
-        await using (var dataCommand = new MySqlCommand(dataSql, connection))
+        async Task<List<LanzouLinkRow>> ExecuteAsync(bool includeExtractionColumn)
         {
+            var projection = includeExtractionColumn
+                ? "id, `链接` AS LinkContent, `创建时间` AS CreatedAt, `提取码` AS ExtractionCode"
+                : "id, `链接` AS LinkContent, `创建时间` AS CreatedAt";
+            var dataSql = $"SELECT {projection} FROM {table} {whereBuilder} ORDER BY id DESC LIMIT @p{limitIndex} OFFSET @p{offsetIndex}";
+
+            await using var dataCommand = new MySqlCommand(dataSql, connection);
             for (var i = 0; i < parameterDefinitions.Count; i++)
             {
                 dataCommand.Parameters.Add(parameterDefinitions[i].ToParameter(i));
@@ -256,6 +282,7 @@ public sealed class LanzouLinkService
             dataCommand.Parameters.Add(new MySqlParameter($"@p{limitIndex}", MySqlDbType.Int32) { Value = safePageSize });
             dataCommand.Parameters.Add(new MySqlParameter($"@p{offsetIndex}", MySqlDbType.Int32) { Value = offset });
 
+            var rows = new List<LanzouLinkRow>();
             await using var reader = await dataCommand.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
@@ -263,13 +290,30 @@ public sealed class LanzouLinkService
                 {
                     Id = reader.IsDBNull(0) ? 0 : reader.GetInt64(0),
                     LinkContent = reader.IsDBNull(1) ? null : reader.GetString(1),
-                    CreatedAt = reader.IsDBNull(2) ? (DateTime?)null : reader.GetDateTime(2)
+                    CreatedAt = reader.IsDBNull(2) ? (DateTime?)null : reader.GetDateTime(2),
+                    ExtractionCode = includeExtractionColumn && reader.FieldCount > 3 && !reader.IsDBNull(3)
+                        ? reader.GetString(3)
+                        : null
                 };
 
-                items.Add(ToRecord(row));
+                rows.Add(row);
             }
+
+            return rows;
         }
 
+        List<LanzouLinkRow> dataRows;
+        try
+        {
+            dataRows = await ExecuteAsync(includeExtractionColumn: true).ConfigureAwait(false);
+        }
+        catch (MySqlException ex) when (ex.Number == (int)MySqlErrorCode.BadFieldError)
+        {
+            _logger.LogDebug(ex, "Link table {Table} does not expose a 提取码 column when paging; falling back to raw content parsing.", table);
+            dataRows = await ExecuteAsync(includeExtractionColumn: false).ConfigureAwait(false);
+        }
+
+        var items = dataRows.Select(ToRecord).ToList();
         return (items, total);
     }
 
@@ -331,15 +375,33 @@ public sealed class LanzouLinkService
         var builder = new StringBuilder();
         foreach (var rune in normalized.EnumerateRunes())
         {
+            if (IsAsciiLetterOrDigit(rune))
+            {
+                builder.Append(char.ToLowerInvariant((char)rune.Value));
+                continue;
+            }
+
             if (Rune.IsLetterOrDigit(rune))
             {
-                builder.Append(rune.ToString().ToLowerInvariant());
+                if (IsChineseRune(rune))
+                {
+                    builder.Append(GetChineseInitial(rune));
+                }
+                else
+                {
+                    builder.Append($"u{rune.Value:x4}");
+                }
+
+                continue;
             }
-            else if (char.IsWhiteSpace((char)rune.Value) || rune.Value is '-' or '_')
+
+            if (Rune.IsWhiteSpace(rune) || rune.Value is '-' or '_')
             {
                 builder.Append('_');
+                continue;
             }
-            else if (IsChineseRune(rune))
+
+            if (IsChineseRune(rune))
             {
                 builder.Append(GetChineseInitial(rune));
             }
@@ -360,6 +422,11 @@ public sealed class LanzouLinkService
         return value is >= 0x4E00 and <= 0x9FFF;
     }
 
+    private static bool IsAsciiLetterOrDigit(Rune rune)
+    {
+        return rune.IsAscii && char.IsLetterOrDigit((char)rune.Value);
+    }
+
     private static string GetChineseInitial(Rune rune)
     {
         if (!rune.IsBmp)
@@ -372,7 +439,7 @@ public sealed class LanzouLinkService
             var bytes = Gb2312.GetBytes(new[] { (char)rune.Value });
             if (bytes.Length < 2)
             {
-                return rune.ToString().ToLowerInvariant();
+                return $"u{rune.Value:x4}";
             }
 
             var code = (bytes[0] << 8) + bytes[1];
@@ -390,7 +457,8 @@ public sealed class LanzouLinkService
             // Ignore encoding failures and fall back below.
         }
 
-        return rune.ToString().ToLowerInvariant();
+        // Ensure we always yield ASCII characters so derived table names remain safe.
+        return $"u{rune.Value:x4}";
     }
 
     private static string EnsureSafeTableName(string table)
@@ -405,22 +473,10 @@ public sealed class LanzouLinkService
 
     private static LanzouLinkInfo? ParseRecord(LanzouLinkRow row)
     {
-        if (string.IsNullOrWhiteSpace(row.LinkContent))
-        {
-            return null;
-        }
+        var url = ExtractUrl(row.LinkContent);
+        var extractionCode = ExtractExtractionCode(row);
 
-        var urlMatch = LinkRegex.Match(row.LinkContent);
-        var codeMatch = CodeRegex.Match(row.LinkContent);
-
-        if (!urlMatch.Success || !codeMatch.Success)
-        {
-            return null;
-        }
-
-        var url = urlMatch.Groups["url"].Value.Trim();
-        var code = codeMatch.Groups["code"].Value.Trim();
-        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(code))
+        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(extractionCode))
         {
             return null;
         }
@@ -430,8 +486,8 @@ public sealed class LanzouLinkService
         return new LanzouLinkInfo
         {
             Id = row.Id,
-            Url = url,
-            ExtractionCode = code,
+            Url = url!,
+            ExtractionCode = extractionCode!,
             CreatedAt = createdAt
         };
     }
@@ -446,11 +502,62 @@ public sealed class LanzouLinkService
         return new LanzouLinkRecord
         {
             Id = row.Id,
-            Url = parsed?.Url ?? string.Empty,
-            ExtractionCode = parsed?.ExtractionCode ?? string.Empty,
+            Url = parsed?.Url ?? ExtractUrl(row.LinkContent) ?? string.Empty,
+            ExtractionCode = parsed?.ExtractionCode ?? ExtractExtractionCode(row) ?? string.Empty,
             RawContent = row.LinkContent ?? string.Empty,
             CreatedAt = new DateTimeOffset(createdAt)
         };
+    }
+
+    private static string? ExtractUrl(string? linkContent)
+    {
+        if (string.IsNullOrWhiteSpace(linkContent))
+        {
+            return null;
+        }
+
+        var trimmed = linkContent.Trim();
+        var match = LinkRegex.Match(trimmed);
+        if (match.Success)
+        {
+            var urlCandidate = match.Groups["url"].Value.Trim();
+            if (!string.IsNullOrWhiteSpace(urlCandidate))
+            {
+                return urlCandidate;
+            }
+        }
+
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) &&
+            (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+             uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+        {
+            return uri.ToString();
+        }
+
+        return null;
+    }
+
+    private static string? ExtractExtractionCode(LanzouLinkRow row)
+    {
+        if (!string.IsNullOrWhiteSpace(row.ExtractionCode))
+        {
+            return row.ExtractionCode.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(row.LinkContent))
+        {
+            var match = CodeRegex.Match(row.LinkContent);
+            if (match.Success)
+            {
+                var codeCandidate = match.Groups["code"].Value.Trim();
+                if (!string.IsNullOrWhiteSpace(codeCandidate))
+                {
+                    return codeCandidate;
+                }
+            }
+        }
+
+        return null;
     }
 
     private sealed class LanzouLinkRow
@@ -458,6 +565,7 @@ public sealed class LanzouLinkService
         public long Id { get; set; }
         public string? LinkContent { get; set; }
         public DateTime? CreatedAt { get; set; }
+        public string? ExtractionCode { get; set; }
     }
 
     private readonly struct ParameterDefinition

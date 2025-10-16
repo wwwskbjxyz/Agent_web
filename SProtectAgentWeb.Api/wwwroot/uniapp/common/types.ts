@@ -535,9 +535,18 @@ export interface SettlementBillItem {
   cycleStartUtc: string;
   cycleEndUtc: string;
   amount: number;
+  suggestedAmount?: number | null;
   isSettled: boolean;
   settledAtUtc?: string | null;
   note?: string | null;
+  breakdowns?: SettlementBillBreakdownItem[];
+}
+
+export interface SettlementBillBreakdownItem {
+  agent: string;
+  displayName: string;
+  count: number;
+  amount: number;
 }
 
 export interface SettlementRateListResponse {

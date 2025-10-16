@@ -216,9 +216,11 @@ public class LinkAuditService
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 
+    private const string DefaultSoftwareName = "默认软件";
+
     private static string ResolveSoftware(string? software)
     {
-        return Normalize(software) ?? "炫舞";
+        return Normalize(software) ?? DefaultSoftwareName;
     }
 
     private static DateTimeOffset? ParseTime(string? input)
