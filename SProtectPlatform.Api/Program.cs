@@ -120,7 +120,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowAll", policy =>
     {
         policy
-            .AllowAnyOrigin()   // ✅ 不限制来源
+            .AllowAnyOrigin()   // 不限制前端端口调用
             .AllowAnyHeader()
             .AllowAnyMethod();
     });

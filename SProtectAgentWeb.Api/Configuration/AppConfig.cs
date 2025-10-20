@@ -17,7 +17,7 @@ public class AppConfig
     [ConfigurationKeyName("认证设置")]
     public JwtConfig Jwt { get; set; } = new();
 
-    [ConfigurationKeyName("蓝奏云数据库")]
+    [ConfigurationKeyName("数据库")]
     public LanzouDatabaseConfig Lanzou { get; set; } = new();
 
     [ConfigurationKeyName("Heartbeat")]
