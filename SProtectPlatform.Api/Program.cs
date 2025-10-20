@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -42,8 +42,6 @@ builder.Services.AddScoped<IWeChatMiniProgramService, WeChatMiniProgramService>(
 builder.Services.AddScoped<IWeChatTemplateDataFactory, WeChatTemplateDataFactory>();
 builder.Services.AddScoped<IWeChatMessageService, WeChatMessageService>();
 
-builder.Services.AddSingleton<ICorsPolicyProvider, DatabaseCorsPolicyProvider>();
-builder.Services.AddSingleton<ICorsService, CorsService>();
 
 builder.Services.AddHttpClient(nameof(ProxyController));
 builder.Services.AddHttpClient(nameof(CardVerificationForwarder));
@@ -117,11 +115,21 @@ builder.WebHost.ConfigureKestrel((context, options) =>
         });
     }
 });
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy
+            .AllowAnyOrigin()   // âœ… ä¸é™åˆ¶æ¥æº
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
 
 
 var app = builder.Build();
-app.UseDefaultFiles();   // Ö§³ÖÄ¬ÈÏ¼ÓÔØ index.html
-app.UseStaticFiles();    // ÆôÓÃ wwwroot ¾²Ì¬×ÊÔ´·þÎñ
+app.UseDefaultFiles();   // æ”¯æŒé»˜è®¤åŠ è½½ index.html
+app.UseStaticFiles();    // å¯ç”¨ wwwroot é™æ€èµ„æºæœåŠ¡
 app.MapGet("/", context =>
 {
     context.Response.Redirect("index.html", permanent: false);
