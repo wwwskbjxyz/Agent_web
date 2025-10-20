@@ -167,18 +167,6 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-app.MapGet("/", context =>
-{
-    context.Response.Redirect("/pages/index/index.html", permanent: false);
-    return Task.CompletedTask;
-});
-
-app.MapGet("/verify", context =>
-{
-    context.Response.Redirect("/pages/verify/index.html", permanent: false);
-    return Task.CompletedTask;
-});
-
 app.UseCors("AllowLocalhost");
 
 if (app.Environment.IsDevelopment())
