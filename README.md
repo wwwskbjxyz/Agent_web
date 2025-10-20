@@ -1,126 +1,137 @@
-# SProtect 多架构系统
+# SProtect SaaS 系统使用指南
 
-本仓库包含三大模块：
+本仓库提供一套由 **SProtectPlatform.Api** 与 **SProtectAgentWeb.Api** 组成的 SaaS 平台：
 
-1. **SProtectPlatform.Api** — .NET 8 编写的主控后端，使用 MySqlConnector 访问 MySQL，负责作者/代理注册登录、软件码绑定、动态 CORS 与请求转发。
-2. **SProtectAgentWeb.Api** — 现有的作者侧后端（SQLite 查询接口），保持原有逻辑，仅新增 Host/Port/DatabasePath/SoftwareType 等配置键支持。
-3. **UniApp 前端** — 位于 `SProtectAgentWeb.Api/wwwroot/uniapp`，提供统一入口，包含作者注册/登录、代理注册/登录、绑定软件码与软件列表选择等页面，并可通过主控后端转发访问作者接口。
+| 模块 | 说明 | 默认端口 | 主要依赖 |
+| --- | --- | --- | --- |
+| `SProtectPlatform.Api` | 平台级后端，负责作者/代理账号体系、绑定关系、请求转发与微信公众号消息 | `5000`（可配置） | .NET 8、MySQL | 
+| `SProtectPlatform.Api/wwwroot` | 平台前端构建产物，由 `SProtectPlatform.Api` 托管静态资源与运行时配置 | 随后端 | 浏览器即可访问 |
+| `SProtectAgentWeb.Api` | 兼容原有作者端（客户端）接口，读取作者侧 SQLite 数据，供平台反向代理调用 | `8080`（可配置） | .NET 8、SQLite 原始数据、可选 MySQL |
 
-## 目录结构
+## 1. 环境准备
 
-```
-SProtectAgentWeb.Api/       作者端后端（.NET 8）
-SProtectPlatform.Api/       主控后端（.NET 8）
-SProtectAgentWeb.Api.sln    既有作者端解决方案
-SProtectAgentWeb.Api/wwwroot/uniapp/             UniApp 前端工程
-```
+在部署任一模块前，请先安装/准备：
 
-## 1. 主控后端 `SProtectPlatform.Api`
+- [.NET 8 SDK](https://dotnet.microsoft.com/) 与运行时（两个 API 均基于 ASP.NET Core）。
+- MySQL 8.x（或兼容版本），用于 `SProtectPlatform.Api` 持久化平台数据。
+- 已有的作者端 SQLite 数据目录（即原始 `idc` 文件夹等），供 `SProtectAgentWeb.Api` 读取。
+- 可选：Node.js 18+（仅当你希望自行重新构建前端时需要）。
 
-### 运行前准备
+> Windows、Linux 均可部署。若运行在 Linux，请确保为 `SProtectAgentWeb.Api` 配置好 `NativeBinaries/sp_sqlite_bridge.dll` 对应的平台版本（仓库已包含 Windows x64 版本，如需 Linux 版需替换为对应动态库）。
 
-1. 创建 MySQL 数据库（默认名称 `sprotect_platform`）。
-2. 在 `SProtectPlatform.Api/appsettings.json` 中配置 `MySql:ConnectionString`、`Jwt:SigningKey` 与 `Encryption:CredentialKey`。
-3. 确保 `Encryption:CredentialKey` 至少 32 个字符；用于 AES 加密代理绑定的作者账号密码。
-4. 运行项目（示例）：
+## 2. 快速上手
+
+### 2.1 配置并启动平台后端 `SProtectPlatform.Api`
+
+1. 创建数据库：
+   ```sql
+   CREATE DATABASE `sprotect_platform` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   ```
+2. 打开 `SProtectPlatform.Api/appsettings.json`，至少修改以下字段：
+   - `MySql:ConnectionString`：填写数据库地址、账号密码等。
+   - `Jwt:SigningKey`：填写 32 位以上随机密钥。
+   - `Encryption:CredentialKey`：同样为 32 位以上随机密钥，用于加密作者凭据。
+   - 如需前端跨域访问，追加 `Cors:AdditionalOrigins` 中的域名。
+3. 在命令行进入项目目录并启动：
    ```bash
    cd SProtectPlatform.Api
    dotnet restore
    dotnet run
    ```
+   启动时会自动执行数据库初始化/升级，创建作者、代理、绑定、微信等表结构，无需额外迁移脚本。
 
-### 功能概览
+### 2.2 配置运行平台前端
 
-- **作者管理**：`/api/authors/register`、`/api/authors/login`
-- **代理管理**：`/api/agents/register`、`/api/agents/login`、`/api/agents/me`
-- **绑定管理**：`/api/bindings`（增删查），支持 `PUT /api/bindings/{id}` 更新绑定凭证，自动加密保存作者账号密码
-- **作者控制台**：`/api/authors/me`（查询与更新作者接口信息）、`/api/authors/me/regenerate-code`（生成新软件码）、`DELETE /api/authors/me`（注销账号），需作者登录后携带 JWT 访问
-- **动态 CORS**：读取 `AllowedOrigins` 表并默认放行 `localhost` / `127.0.0.1`（含 8080 端口与 HTTPS），确保前端开发端口 8080 可直接访问
-- **请求转发**：`/api/proxy/{softwareCode}/...` 将代理请求转发至作者端，同时携带绑定凭据，支持透传作者登录产生的 Token
-- **微信订阅消息**：配置 `WeChat` 段的 AppId/AppSecret 与模板 ID 后，代理或作者可在 `/api/wechat` 系列接口绑定小程序账号、触发即时沟通、黑名单预警、结算通知等订阅消息
-- **数据库初始化**：启动时自动创建 `Authors`、`Agents`、`Bindings`、`AllowedOrigins` 四张表
+- 平台前端已打包在 `SProtectPlatform.Api/wwwroot`，默认随后端提供静态页面，无需额外构建。
+- 若要改动 API 地址等运行时配置，编辑 `wwwroot/config/runtime-config.js` 中的 `apiBaseUrl`（键名为 `__SPROTECT_RUNTIME_CONFIG__`）。
+- 访问 `http://<platform-host>:<port>/` 即可打开平台 UI。
 
-### 表结构（简化）
+### 2.3 配置作者端后端 `SProtectAgentWeb.Api`
 
-| 表名          | 主要字段 | 描述 |
-| ------------- | -------- | ---- |
-| `Authors`     | `Email`, `ApiAddress`, `ApiPort`, `SoftwareType`, `SoftwareCode` | 作者接口信息与唯一软件码 |
-| `Agents`      | `Email`, `DisplayName`, `PasswordHash` | 代理账号 |
-| `Bindings`    | `AgentId`, `AuthorId`, `AuthorAccount`, `EncryptedAuthorPassword` | 代理-作者绑定关系 |
-| `AllowedOrigins` | `Origin` | 动态 CORS 白名单 |
-| `WeChatBindings` | `UserType`, `UserId`, `OpenId` | 记录作者/代理与微信 openid 的绑定关系 |
-| `WeChatAccessTokens` | `AppId`, `AccessToken`, `ExpiresAtUtc` | 缓存微信全局 access_token |
+1. 将原作者端 SQLite 数据目录放在合适位置，并在 `appsettings.json` 的 `服务器设置` 节中设置：
+   - `数据库路径`/`DatabasePath`：指向 SQLite 根目录（例如 `idc`）。
+   - `服务器地址`/`Host`、`端口`/`Port`：指定监听地址与端口。
+   - `软件类型`/`SoftwareType`：标识当前作者端的软件类型，供平台区分。
+2. 在 `认证设置` 节配置 JWT：
+   - `JWT密钥`：不少于 32 位的随机字符串。
+   - 可按需调整签发者、受众、过期时间等。
+3. （可选）如需启用蓝奏云相关统计或其他扩展，可在 `数据库` 节配置 MySQL 连接。
+4. 启动：
+   ```bash
+   cd SProtectAgentWeb.Api
+   dotnet restore
+   dotnet run
+   ```
+   若使用 systemd/Windows 服务部署，可改为 `dotnet publish -c Release` 后部署可执行文件。
 
-> **提示**：`WeChat:Previews` 中的键名需要与微信订阅消息模板字段一一对应（例如 `phrase2`、`time3`、`character_string1` 等）。
-> 如果模板字段有调整，可在配置文件中直接修改对应键值，前端的预览/测试推送会自动读取更新后的内容。
-| `WeChatMessageLogs` | `TemplateKey`, `UserType`, `UserId`, `Success` | 订阅消息发送日志 |
+### 2.4 关联平台与作者端
 
-### 请求转发说明
+1. 在平台前端/Swagger 中注册作者账号，并填写作者端 `API 地址`、`端口` 与 `软件类型`。
+2. 代理登录平台后，绑定对应的软件码及作者账号密码。平台会使用 `Encryption:CredentialKey` 加密后存储。
+3. 平台代理入口调用 `/api/proxy/{软件码}/...` 时，会自动转发请求到对应作者端，并附带代理绑定凭据。
 
-- 前端访问业务接口时调用：`/api/proxy/{softwareCode}/api/...`
-- 主控后端验证代理 JWT，读取绑定凭据，必要时附带 `X-SProtect-Author-Account`、`X-SProtect-Author-Password` 以及 `X-SProtect-Remote-Token`
-- 若前端携带 `X-SProtect-Remote-Token`，主控后端会将其设置为转发请求的 `Authorization` 头，确保作者端权限验证通过
+## 3. `SProtectPlatform.Api` 配置详解
 
-## 2. 作者端 `SProtectAgentWeb.Api`
+`appsettings.json` 中的主要配置项如下（均可通过环境变量覆盖，例如 `MySql__ConnectionString`）：
 
-原工程保持不变，仅在配置文件与绑定对象中新增英文键支持：
+| 配置节 | 关键字段 | 说明 |
+| --- | --- | --- |
+| `MySql` | `ConnectionString` | MySQL 连接字符串。启动时会自动建表/补充索引。|
+| `Jwt` | `Issuer`、`Audience`、`SigningKey`、`AccessTokenMinutes` | 平台 JWT 设置，`SigningKey` 必须 ≥32 字符。|
+| `Encryption` | `CredentialKey` | AES 加密密钥（≥32 字符）。|
+| `Cors` | `AdditionalOrigins` | 除内置 `localhost/127.0.0.1` 外的前端域名白名单。|
+| `Forwarding` | `RequestTimeoutSeconds` | 平台代理作者端接口时的超时秒数。|
+| `WeChat` | `AppId`、`AppSecret`、`Templates`、`Previews`、`TokenSafetyMarginSeconds` | 小程序订阅消息所需的凭据及模板预览文案。|
+| `Https` | `Enabled`、`HttpPort`、`HttpsPort`、`CertificatePath`、`CertificatePassword` | 启用 HTTPS 并指定证书路径/口令。|
 
-```jsonc
-"服务器设置": {
-  "服务器地址": "0.0.0.0",
-  "Host": "0.0.0.0",
-  "端口": 8080,
-  "Port": 8080,
-  "数据库路径": "idc",
-  "DatabasePath": "idc",
-  "SoftwareType": "SP",
-  "软件类型": "SP"
-}
-```
+> 若启用 HTTPS，请确保 `CertificatePath` 为绝对路径或相对 `ContentRoot` 的路径，且证书存在。Kestrel 将在配置无误时同时监听 HTTP 与 HTTPS 端口。
 
-后端仍通过 `appsettings.json` 配置 SQLite 路径与监听端口，可作为作者独立部署的接口服务。
+### 自动化维护
 
-## 3. 前端 `SProtectAgentWeb.Api/wwwroot/uniapp`
+- `DatabaseInitializer` 启动时会检查/创建 `Authors`、`Agents`、`AuthorSoftwares`、`Bindings`、`AllowedOrigins`、`WeChat*` 等表，并补齐缺失字段、索引与默认值，适合持续迭代升级。
+- 平台使用内置 JWT 与 AES 服务管理账号密码，相关服务定义在 `Services` 目录中，可根据需要扩展。
+- 平台默认允许所有来源访问（`AllowAll` CORS 策略），如需收紧可在 `Program.cs` 中调整策略或结合数据库白名单实现精细控制。
 
-### 新增/改动页面
+## 4. `SProtectAgentWeb.Api` 配置详解
 
-- `/pages/login/index` — 登录入口，提供“代理入口”“作者入口”按钮（接口地址现改由源码配置，不再在页面展示）
-- `/pages/login/agent` — 默认展示登录表单，支持注册时绑定首个软件码；登录成功后跳转至 `/pages/index/index`
-- `/pages/login/author` — 默认展示登录表单；注册成功后提示新软件码并可直接登录主控作者控制台
-- `/pages/author/dashboard` — 作者控制台，可更新接口地址/端口/类型、重新生成软件码、注销账号
-- `/pages/agent/bind` — 代理软件码管理，新增“编辑凭证”对话框用于修改绑定的作者账号与密码
-- `/pages/home` — 精简为绑定管理页（软件码列表与自动登录逻辑保留）
-- `/pages/index/index` — 代理主控制台，展示快捷按钮、销量统计、趋势图等原有首页内容
+`SProtectAgentWeb.Api/appsettings.json` 支持中英文混合键名，重要配置如下：
 
-### 运行方式
+| 配置节 | 关键字段 | 说明 |
+| --- | --- | --- |
+| `服务器设置` / `Server` | `Host`、`Port`、`DatabasePath`、`SoftwareType`、`权限` | 监听地址/端口、SQLite 根目录、软件类型以及超级用户账号列表（逗号分隔）。|
+| `认证设置` / `Jwt` | `JWT密钥`、`JWT签发者`、`JWT受众`、`JWT访问令牌过期分钟数`、`JWT容许时间偏差秒数` | 用于生成作者端/代理端登录 Token。|
+| `数据库` | `主机`、`端口`、`数据库`、`用户名`、`密码` | 可选的 MySQL 连接，供扩展功能使用（例如蓝奏云链接审计）。|
+| `Heartbeat` | `Secret`、`ExpirationSeconds` | 心跳接口校验密钥及过期策略。|
+| `聊天设置` | `保留小时数`、`允许图片消息`、`允许表情包`、`最大图片大小KB` | 内置客服聊天模块的行为配置。|
 
-前端为标准 UniApp/Vue 项目，可在 `SProtectAgentWeb.Api/wwwroot/uniapp` 内使用 HBuilderX 或 `npm`/`pnpm` 构建。开发时默认 API 地址为 `http://127.0.0.1:5050`，可在登录入口页面调整。
+### 数据文件与原生依赖
 
-### 与主控后端交互流程
+- `Server.DatabasePath` 需指向包含作者端 SQLite 数据库文件（如 `data.db`、`agent.db` 等）的目录。程序会自动组合路径读取，不需要包含文件名。
+- 请确保 `NativeBinaries` 目录与可执行文件位于同一层级，以便加载 `sp_sqlite_bridge` 原生库与作者端原有的 SQLite 函数。
 
-1. 代理在主控后端注册/登录 → 获取平台 Token
-2. 绑定作者软件码（保存作者端账号/密码）
-3. 前端选择某个软件码，主控自动通过 `/api/proxy/{code}` 转发请求至作者端
-4. 自动为选择的软件码调用作者端登录（使用绑定凭据），并缓存作者返回的 JWT 供后续接口使用
+### 运行与发布
 
-## 4. 跨域与安全
+- 开发调试：`dotnet run` 会读取当前目录下的配置文件；调试前请确认已生成 `appsettings.Development.json` 或修改默认配置。
+- 生产部署：
+  ```bash
+  dotnet publish -c Release -o publish
+  cd publish
+  ./SProtectAgentWeb.Api
+  ```
+  可结合反向代理（Nginx/IIS）或 systemd/Windows 服务运行。
 
-- 动态 CORS：在 `AllowedOrigins` 表中维护白名单，可按需新增生产域名
-- 主控与作者凭据：作者端账号密码在数据库中使用 AES 加密存储
-- 代理 Token：使用 JWT（HMAC-SHA256），可通过 `Jwt` 配置调整 Issuer/Audience/有效期
+## 5. 与平台前端的协同
 
-## 5. 开发建议
-
-- 主控后端使用 `MySqlConnector` 官方包连接 MySQL
-- 前端默认在 8080 端口开发，结合动态 CORS 可直接访问主控后端
-- 当作者端地址、端口、类型变更时，在主控后端更新信息即可，无需重新编译前端
-- 如需新增软件类型（QP/API 等），仅需在作者注册处扩展下拉选项及业务映射
+- 平台前端通过 `runtime-config.js` 中的 `apiBaseUrl` 连接 `SProtectPlatform.Api`，请根据实际部署地址修改。
+- 静态资源（`wwwroot/assets`）为打包后的前端文件。若需要重新构建，可在单独的前端源码仓库进行构建，再覆盖到 `wwwroot`。
+- `Program.cs` 已启用默认文件和静态文件服务，因此发布后端即可同时提供前端页面。
 
 ## 6. 常见问题
 
-- **为何需要同时保存作者账号密码？** 用于主控自动登录作者端并在转发请求时带上凭据，代理无需重复输入。
-- **如何新增允许访问的域名？** 向 `AllowedOrigins` 表插入记录即可，无需重启服务。
-- **前端报“未选择软件码”**：请先在绑定页面绑定并选择软件码，或在 `/pages/home` 切换。
-- **绑定索引无法自动升级**：若启动日志提示 `UX_Bindings` 无法删除，可参考 `docs/upgrade-binding-index.sql` 中的手动脚本，在数据库中执行后重新启动主控服务。
+1. **数据库连接失败**：请确认 MySQL 账号具备建表权限，并检查 `ConnectionString` 与数据库字符集设置（推荐 `utf8mb4`）。
+2. **JWT 校验报错**：两端都需要至少 32 字符的密钥，且平台/作者端的签发者、受众需与配置一致。
+3. **代理无法访问作者端接口**：确认平台中绑定的软件码指向了正确的作者端地址/端口，并确保作者端对外网络可达。
+4. **静态前端访问空白页**：通常是 `runtime-config.js` 中 API 地址错误或浏览器跨域限制。请检查平台日志的 CORS 配置与网络请求。
+5. **加载 SQLite 插件失败**：检查 `sp_sqlite_bridge.dll` 是否匹配当前系统架构；在 Linux 下需将其替换为 `.so` 文件并更新 `SqliteBridge` 加载逻辑。
 
-如需进一步扩展（短信验证码、邮箱找回密码等），可在主控后端增加相应模块并复用现有认证/加密基础设施。
+如需二次开发，可在各 API 的 `Controllers` 与 `Services` 目录中扩展业务逻辑，保持配置字段与数据库结构同步即可。
