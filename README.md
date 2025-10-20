@@ -134,4 +134,3 @@
 4. **静态前端访问空白页**：通常是 `runtime-config.js` 中 API 地址错误或浏览器跨域限制。请检查平台日志的 CORS 配置与网络请求。
 5. **加载 SQLite 插件失败**：检查 `sp_sqlite_bridge.dll` 是否匹配当前系统架构；在 Linux 下需将其替换为 `.so` 文件并更新 `SqliteBridge` 加载逻辑。
 
-如需二次开发，可在各 API 的 `Controllers` 与 `Services` 目录中扩展业务逻辑，保持配置字段与数据库结构同步即可。
