@@ -118,7 +118,15 @@ builder.WebHost.ConfigureKestrel((context, options) =>
     }
 });
 
+
 var app = builder.Build();
+app.UseDefaultFiles();   // 支持默认加载 index.html
+app.UseStaticFiles();    // 启用 wwwroot 静态资源服务
+app.MapGet("/", context =>
+{
+    context.Response.Redirect("index.html", permanent: false);
+    return Task.CompletedTask;
+});
 
 app.UseSwagger();
 app.UseSwaggerUI();

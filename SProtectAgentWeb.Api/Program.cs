@@ -167,6 +167,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+
 app.UseCors("AllowLocalhost");
 
 if (app.Environment.IsDevelopment())
