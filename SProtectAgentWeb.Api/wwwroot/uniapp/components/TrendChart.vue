@@ -87,6 +87,35 @@ const pointPositions = ref<{ x: number; y: number; value: number; label: string 
 const tooltip = reactive({ visible: false, x: 0, y: 0, label: '', value: 0 });
 const tooltipStyle = computed(() => ({ left: `${tooltip.x}px`, top: `${tooltip.y}px` }));
 
+function formatAxisLabel(date: string): string {
+  if (!date) {
+    return '';
+  }
+
+  const trimmed = date.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const withoutTime = trimmed.split('T')[0].split(' ')[0];
+  const match = withoutTime.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (match) {
+    const [, , month, day] = match;
+    return `${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  const segments = withoutTime.split(/[-/]/).filter(Boolean);
+  if (segments.length >= 2) {
+    const month = segments[segments.length - 2]?.padStart(2, '0');
+    const day = segments[segments.length - 1]?.padStart(2, '0');
+    if (month && day) {
+      return `${month}-${day}`;
+    }
+  }
+
+  return trimmed;
+}
+
 const summaryText = computed(() => {
   if (props.total == null) {
     return '';
@@ -200,12 +229,21 @@ function draw(points: TrendPoint[]) {
 
   ctx.setFillStyle('rgba(226, 232, 240, 0.65)');
   ctx.setFontSize(adjust(18));
+  const previousTextAlign = (ctx as any).textAlign;
+  if (typeof ctx.setTextAlign === 'function') {
+    ctx.setTextAlign('center');
+  }
   coordinates.forEach((coord, index) => {
     if (index % 2 === 0 || index === points.length - 1) {
       const y = height - paddingY + 24;
-      ctx.fillText(points[index].date, coord.x - 24, y);
+      const label = formatAxisLabel(points[index].date);
+      ctx.fillText(label, coord.x, y);
     }
   });
+  if (typeof ctx.setTextAlign === 'function') {
+    const fallback = typeof previousTextAlign === 'string' ? previousTextAlign : 'left';
+    ctx.setTextAlign(fallback);
+  }
 
   coordinates.forEach((coord) => {
     ctx.beginPath();
