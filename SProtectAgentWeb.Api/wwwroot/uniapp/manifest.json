@@ -25,7 +25,7 @@
             "mode" : "hash"
         },
         "devServer" : {
-            "https" : true,
+            "https" : false,
             "port" : 8080
         }
     },

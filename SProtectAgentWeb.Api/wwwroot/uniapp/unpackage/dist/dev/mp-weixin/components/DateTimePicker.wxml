@@ -1,0 +1,1 @@
+<view class="picker-wrapper data-v-c262edfd"><picker class="data-v-c262edfd" mode="multiSelector" range="{{c}}" value="{{d}}" bindchange="{{e}}" bindcolumnchange="{{f}}"><view class="{{['picker-display', 'data-v-c262edfd', b && 'placeholder']}}">{{a}}</view></picker><button wx:if="{{g}}" class="clear-btn data-v-c262edfd" catchtap="{{h}}">清除</button></view>
