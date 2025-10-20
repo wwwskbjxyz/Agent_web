@@ -12,4 +12,9 @@
     <PackageReference Include="MySqlConnector" Version="2.3.5" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
   </ItemGroup>
+	<ItemGroup Condition="Exists('wwwroot')">
+		<None Include="wwwroot/**/*.*">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
 </Project>

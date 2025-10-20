@@ -487,34 +487,34 @@ ORDER BY SEQ_IN_INDEX";
             Index = indexName
         }, cancellationToken: cancellationToken))).ToList();
 
-        //if (existingRows.Count > 0)
-        //{
-        //    var isUnique = existingRows[0].NonUnique == 0;
-        //    var existingColumns = existingRows.Select(row => row.ColumnName).ToArray();
-        //    if (isUnique == unique && existingColumns.SequenceEqual(columns, StringComparer.OrdinalIgnoreCase))
-        //    {
-        //        return;
-        //    }
+        if (existingRows.Count > 0)
+        {
+            var isUnique = existingRows[0].NonUnique == 0;
+            var existingColumns = existingRows.Select(row => row.ColumnName).ToArray();
+            if (isUnique == unique && existingColumns.SequenceEqual(columns, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
 
-        //    if (string.Equals(tableName, "AuthorSoftwares", StringComparison.OrdinalIgnoreCase)
-        //        && string.Equals(indexName, "IDX_AuthorSoftwares_AuthorId", StringComparison.OrdinalIgnoreCase))
-        //    {
-        //        _logger.LogInformation("检测到 {Table} 的索引 {Index} 已由管理员手动维护，跳过自动修复。", tableName, indexName);
-        //        return;
-        //    }
+            if (string.Equals(tableName, "AuthorSoftwares", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(indexName, "IDX_AuthorSoftwares_AuthorId", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("检测到 {Table} 的索引 {Index} 已由管理员手动维护，跳过自动修复。", tableName, indexName);
+                return;
+            }
 
-        //    if (string.Equals(tableName, "Bindings", StringComparison.OrdinalIgnoreCase)
-        //        && string.Equals(indexName, "UX_Bindings", StringComparison.OrdinalIgnoreCase))
-        //    {
-        //        _logger.LogInformation("检测到 {Table} 的索引 {Index} 已由管理员手动维护，跳过自动修复。", tableName, indexName);
-        //        return;
-        //    }
+            if (string.Equals(tableName, "Bindings", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(indexName, "UX_Bindings", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("检测到 {Table} 的索引 {Index} 已由管理员手动维护，跳过自动修复。", tableName, indexName);
+                return;
+            }
 
-        //    if (!await DropIndexAsync(connection, tableName, indexName, cancellationToken))
-        //    {
-        //        return;
-        //    }
-        //}
+            if (!await DropIndexAsync(connection, tableName, indexName, cancellationToken))
+            {
+                return;
+            }
+        }
 
         var formattedColumns = string.Join(", ", columns.Select(column => $"`{column}`"));
         var createSql = unique
