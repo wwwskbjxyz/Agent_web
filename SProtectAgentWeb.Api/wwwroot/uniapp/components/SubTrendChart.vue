@@ -124,6 +124,35 @@ const summaryText = computed(() => {
   return `最近子代理7天合计：${props.total}`;
 });
 
+function formatCategoryLabel(date: string): string {
+  if (!date) {
+    return '';
+  }
+
+  const trimmed = date.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const withoutTime = trimmed.split('T')[0].split(' ')[0];
+  const match = withoutTime.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (match) {
+    const [, , month, day] = match;
+    return `${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  const segments = withoutTime.split(/[-/]/).filter(Boolean);
+  if (segments.length >= 2) {
+    const month = segments[segments.length - 2]?.padStart(2, '0');
+    const day = segments[segments.length - 1]?.padStart(2, '0');
+    if (month && day) {
+      return `${month}-${day}`;
+    }
+  }
+
+  return trimmed;
+}
+
 function draw() {
   if (!contextReady.value) return;
   const ctx = uni.createCanvasContext(canvasId, instance?.proxy);
@@ -242,12 +271,21 @@ function draw() {
 
   ctx.setFillStyle('rgba(226, 232, 240, 0.78)');
   ctx.setFontSize(adjust(18));
+  const previousTextAlign = (ctx as any).textAlign;
+  if (typeof ctx.setTextAlign === 'function') {
+    ctx.setTextAlign('center');
+  }
   points.forEach((point, index) => {
     if (index % 2 === 0 || index === points.length - 1) {
       const y = height - paddingY + 26;
-      ctx.fillText(point.label, point.x - 24, y);
+      const label = formatCategoryLabel(point.label);
+      ctx.fillText(label, point.x, y);
     }
   });
+  if (typeof ctx.setTextAlign === 'function') {
+    const fallback = typeof previousTextAlign === 'string' ? previousTextAlign : 'left';
+    ctx.setTextAlign(fallback);
+  }
 
   ctx.draw();
   categoryPoints.value = points;
