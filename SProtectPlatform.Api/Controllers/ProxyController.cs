@@ -1,5 +1,8 @@
+using System;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -99,12 +102,14 @@ public sealed class ProxyController : ControllerBase
         var targetUri = uriBuilder.Uri;
         var requestMessage = new HttpRequestMessage(new HttpMethod(Request.Method), targetUri);
 
+        string requestBody = string.Empty;
+
         if (!HttpMethods.IsGet(Request.Method) && !HttpMethods.IsHead(Request.Method))
         {
             using var reader = new StreamReader(Request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
-            var body = await reader.ReadToEndAsync(cancellationToken);
+            requestBody = await reader.ReadToEndAsync(cancellationToken) ?? string.Empty;
             Request.Body.Position = 0;
-            requestMessage.Content = new StringContent(body ?? string.Empty, Encoding.UTF8, Request.ContentType ?? "application/json");
+            requestMessage.Content = new StringContent(requestBody, Encoding.UTF8, Request.ContentType ?? "application/json");
         }
 
         foreach (var header in Request.Headers)
@@ -130,6 +135,28 @@ public sealed class ProxyController : ControllerBase
         requestMessage.Headers.UserAgent.Add(ProductInfoHeaderValue.Parse($"SProtectPlatform/1.0"));
         requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Author-Account", binding.AuthorAccount);
         requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Author-Password", authorPassword);
+
+        var requiresSignature = RequiresSignature(targetUri);
+        if (requiresSignature)
+        {
+            var sharedSecret = _forwardingOptions.SharedSecret?.Trim();
+            if (string.IsNullOrEmpty(sharedSecret))
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse<string>.Failure("平台未配置作者端对接密钥", StatusCodes.Status503ServiceUnavailable));
+            }
+
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+            var method = Request.Method?.ToUpperInvariant() ?? HttpMethods.Get;
+            var contentHash = ComputeSha256(requestBody);
+            var pathAndQuery = targetUri.PathAndQuery;
+            var canonicalRequest = string.Join('\n', new[] { method, pathAndQuery, timestamp, contentHash });
+            var signature = ComputeSignature(sharedSecret, canonicalRequest);
+
+            requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Timestamp", timestamp);
+            requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Content-Hash", contentHash);
+            requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Signature", signature);
+            requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Signature-Algorithm", "HMAC-SHA256");
+        }
 
         if (!string.IsNullOrWhiteSpace(remoteToken))
         {
@@ -175,5 +202,129 @@ public sealed class ProxyController : ControllerBase
     {
         var normalized = path?.Trim('/') ?? string.Empty;
         return string.IsNullOrEmpty(normalized) ? string.Empty : normalized;
+    }
+
+    private bool RequiresSignature(Uri targetUri)
+    {
+        var unsignedPaths = _forwardingOptions.UnsignedPaths;
+        if (unsignedPaths == null || unsignedPaths.Count == 0)
+        {
+            return true;
+        }
+
+        var path = targetUri.AbsolutePath;
+        foreach (var pattern in unsignedPaths)
+        {
+            if (MatchesUnsignedPath(path, pattern))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool MatchesUnsignedPath(string actualPath, string? pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return false;
+        }
+
+        var trimmedPattern = pattern.Trim();
+        var hasWildcard = trimmedPattern.EndsWith("/*", StringComparison.Ordinal);
+        if (hasWildcard)
+        {
+            trimmedPattern = trimmedPattern[..^2];
+        }
+
+        var normalizedPattern = NormalizePath(trimmedPattern);
+        var normalizedActual = NormalizePath(actualPath);
+
+        if (hasWildcard)
+        {
+            if (normalizedActual.StartsWith(normalizedPattern, StringComparison.OrdinalIgnoreCase) &&
+                (normalizedActual.Length == normalizedPattern.Length || normalizedActual[normalizedPattern.Length] == '/'))
+            {
+                return true;
+            }
+
+            return NormalizeForComparison(normalizedActual).StartsWith(
+                NormalizeForComparison(normalizedPattern),
+                StringComparison.Ordinal);
+        }
+
+        return string.Equals(normalizedActual, normalizedPattern, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(
+                   NormalizeForComparison(normalizedActual),
+                   NormalizeForComparison(normalizedPattern),
+                   StringComparison.Ordinal);
+    }
+
+    private static string NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "/";
+        }
+
+        var normalized = path.Trim();
+        var queryIndex = normalized.IndexOf('?', StringComparison.Ordinal);
+        if (queryIndex >= 0)
+        {
+            normalized = normalized[..queryIndex];
+        }
+
+        if (!normalized.StartsWith('/'))
+        {
+            normalized = "/" + normalized.TrimStart('/');
+        }
+
+        while (normalized.Length > 1 && normalized.EndsWith('/'))
+        {
+            normalized = normalized[..^1];
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeForComparison(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            switch (ch)
+            {
+                case '-' or '_':
+                    continue;
+                case '/':
+                    builder.Append('/');
+                    break;
+                default:
+                    builder.Append(char.ToLowerInvariant(ch));
+                    break;
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ComputeSha256(string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static string ComputeSignature(string secret, string payload)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToBase64String(hash);
     }
 }

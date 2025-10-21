@@ -10,6 +10,7 @@ namespace SProtectAgentWeb.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Route("api/card-verification")]
 public class CardVerificationController : ControllerBase
 {
     private readonly CardVerificationService _verificationService;

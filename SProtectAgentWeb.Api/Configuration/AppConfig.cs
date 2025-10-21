@@ -23,6 +23,9 @@ public class AppConfig
     [ConfigurationKeyName("Heartbeat")]
     public HeartbeatConfig Heartbeat { get; set; } = new();
 
+    [ConfigurationKeyName("PlatformIntegration")]
+    public PlatformIntegrationConfig PlatformIntegration { get; set; } = new();
+
     [ConfigurationKeyName("聊天设置")]
     public ChatConfig Chat { get; set; } = new();
 
@@ -180,6 +183,42 @@ public class HeartbeatConfig
     /// <summary>Seconds after which a heartbeat is considered stale.</summary>
     [Range(30, 3600)]
     public int ExpirationSeconds { get; set; } = 300;
+}
+
+public class PlatformIntegrationConfig
+{
+    [ConfigurationKeyName("SharedSecret")]
+    public string SharedSecret { get; set; } = string.Empty;
+
+    [ConfigurationKeyName("共享密钥")]
+    public string SharedSecretLegacy
+    {
+        get => SharedSecret;
+        set => SharedSecret = value ?? string.Empty;
+    }
+
+    [ConfigurationKeyName("AllowedClockSkewSeconds")]
+    [Range(0, 900)]
+    public int AllowedClockSkewSeconds { get; set; } = 300;
+
+    [ConfigurationKeyName("允许时间偏差秒数")]
+    public int AllowedClockSkewSecondsLegacy
+    {
+        get => AllowedClockSkewSeconds;
+        set => AllowedClockSkewSeconds = value < 0 ? AllowedClockSkewSeconds : value;
+    }
+
+    /// <summary>
+    /// API paths that should skip signature validation. Supports exact matches and <c>/*</c> suffix for prefix checks.
+    /// </summary>
+    public List<string> SignatureBypassPaths { get; set; } = new();
+
+    [ConfigurationKeyName("跳过签名接口列表")]
+    public List<string> SignatureBypassPathsLegacy
+    {
+        get => SignatureBypassPaths;
+        set => SignatureBypassPaths = value ?? new List<string>();
+    }
 }
 
 public class ChatConfig
