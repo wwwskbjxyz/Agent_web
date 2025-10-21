@@ -167,11 +167,22 @@ public sealed class PlatformSignatureValidationMiddleware
 
         if (hasWildcard)
         {
-            return normalizedActual.StartsWith(normalizedPattern, StringComparison.OrdinalIgnoreCase) &&
-                   (normalizedActual.Length == normalizedPattern.Length || normalizedActual[normalizedPattern.Length] == '/');
+            if (normalizedActual.StartsWith(normalizedPattern, StringComparison.OrdinalIgnoreCase) &&
+                (normalizedActual.Length == normalizedPattern.Length || normalizedActual[normalizedPattern.Length] == '/'))
+            {
+                return true;
+            }
+
+            return NormalizeForComparison(normalizedActual).StartsWith(
+                NormalizeForComparison(normalizedPattern),
+                StringComparison.Ordinal);
         }
 
-        return string.Equals(normalizedActual, normalizedPattern, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(normalizedActual, normalizedPattern, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(
+                   NormalizeForComparison(normalizedActual),
+                   NormalizeForComparison(normalizedPattern),
+                   StringComparison.Ordinal);
     }
 
     private static string NormalizePath(string? path)
@@ -199,6 +210,32 @@ public sealed class PlatformSignatureValidationMiddleware
         }
 
         return normalized;
+    }
+
+    private static string NormalizeForComparison(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            switch (ch)
+            {
+                case '-' or '_':
+                    continue;
+                case '/':
+                    builder.Append('/');
+                    break;
+                default:
+                    builder.Append(char.ToLowerInvariant(ch));
+                    break;
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static bool TryGetHeader(HttpContext context, string headerName, out string value)
