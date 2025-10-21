@@ -4,6 +4,8 @@
 
 源代码全量部署适配教程： https://www.bilibili.com/video/BV1JqWQzpEMz/?share_source=copy_web&vd_source=35f5b062173ea51e9ba0c6dfdb68f31b
 
+下载Releases直接开箱使用教程：https://www.bilibili.com/video/BV1w9WXzhEZm/?vd_source=334bf6290061e3f509554301debaad6f
+
 演示站点：http://chen.roccloudiot.cn
 作者账户admin 密码123456
 代理账户agent 密码123456
