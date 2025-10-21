@@ -207,6 +207,18 @@ public class PlatformIntegrationConfig
         get => AllowedClockSkewSeconds;
         set => AllowedClockSkewSeconds = value < 0 ? AllowedClockSkewSeconds : value;
     }
+
+    /// <summary>
+    /// API paths that should skip signature validation. Supports exact matches and <c>/*</c> suffix for prefix checks.
+    /// </summary>
+    public List<string> SignatureBypassPaths { get; set; } = new();
+
+    [ConfigurationKeyName("跳过签名接口列表")]
+    public List<string> SignatureBypassPathsLegacy
+    {
+        get => SignatureBypassPaths;
+        set => SignatureBypassPaths = value ?? new List<string>();
+    }
 }
 
 public class ChatConfig

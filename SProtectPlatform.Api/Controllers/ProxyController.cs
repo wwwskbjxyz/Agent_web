@@ -1,3 +1,4 @@
+
 using System;
 using System.Globalization;
 using System.Linq;
@@ -136,23 +137,27 @@ public sealed class ProxyController : ControllerBase
         requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Author-Account", binding.AuthorAccount);
         requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Author-Password", authorPassword);
 
-        var sharedSecret = _forwardingOptions.SharedSecret?.Trim();
-        if (string.IsNullOrEmpty(sharedSecret))
+        var requiresSignature = RequiresSignature(targetUri);
+        if (requiresSignature)
         {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse<string>.Failure("平台未配置作者端对接密钥", StatusCodes.Status503ServiceUnavailable));
+            var sharedSecret = _forwardingOptions.SharedSecret?.Trim();
+            if (string.IsNullOrEmpty(sharedSecret))
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse<string>.Failure("平台未配置作者端对接密钥", StatusCodes.Status503ServiceUnavailable));
+            }
+
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+            var method = Request.Method?.ToUpperInvariant() ?? HttpMethods.Get;
+            var contentHash = ComputeSha256(requestBody);
+            var pathAndQuery = targetUri.PathAndQuery;
+            var canonicalRequest = string.Join('\n', new[] { method, pathAndQuery, timestamp, contentHash });
+            var signature = ComputeSignature(sharedSecret, canonicalRequest);
+
+            requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Timestamp", timestamp);
+            requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Content-Hash", contentHash);
+            requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Signature", signature);
+            requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Signature-Algorithm", "HMAC-SHA256");
         }
-
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
-        var method = Request.Method?.ToUpperInvariant() ?? HttpMethods.Get;
-        var contentHash = ComputeSha256(requestBody);
-        var pathAndQuery = targetUri.PathAndQuery;
-        var canonicalRequest = string.Join('\n', new[] { method, pathAndQuery, timestamp, contentHash });
-        var signature = ComputeSignature(sharedSecret, canonicalRequest);
-
-        requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Timestamp", timestamp);
-        requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Content-Hash", contentHash);
-        requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Signature", signature);
-        requestMessage.Headers.TryAddWithoutValidation("X-SProtect-Signature-Algorithm", "HMAC-SHA256");
 
         if (!string.IsNullOrWhiteSpace(remoteToken))
         {
@@ -198,6 +203,79 @@ public sealed class ProxyController : ControllerBase
     {
         var normalized = path?.Trim('/') ?? string.Empty;
         return string.IsNullOrEmpty(normalized) ? string.Empty : normalized;
+    }
+
+    private bool RequiresSignature(Uri targetUri)
+    {
+        var unsignedPaths = _forwardingOptions.UnsignedPaths;
+        if (unsignedPaths == null || unsignedPaths.Count == 0)
+        {
+            return true;
+        }
+
+        var path = targetUri.AbsolutePath;
+        foreach (var pattern in unsignedPaths)
+        {
+            if (MatchesUnsignedPath(path, pattern))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool MatchesUnsignedPath(string actualPath, string? pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return false;
+        }
+
+        var trimmedPattern = pattern.Trim();
+        var hasWildcard = trimmedPattern.EndsWith("/*", StringComparison.Ordinal);
+        if (hasWildcard)
+        {
+            trimmedPattern = trimmedPattern[..^2];
+        }
+
+        var normalizedPattern = NormalizePath(trimmedPattern);
+        var normalizedActual = NormalizePath(actualPath);
+
+        if (hasWildcard)
+        {
+            return normalizedActual.StartsWith(normalizedPattern, StringComparison.OrdinalIgnoreCase) &&
+                   (normalizedActual.Length == normalizedPattern.Length || normalizedActual[normalizedPattern.Length] == '/');
+        }
+
+        return string.Equals(normalizedActual, normalizedPattern, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "/";
+        }
+
+        var normalized = path.Trim();
+        var queryIndex = normalized.IndexOf('?', StringComparison.Ordinal);
+        if (queryIndex >= 0)
+        {
+            normalized = normalized[..queryIndex];
+        }
+
+        if (!normalized.StartsWith('/'))
+        {
+            normalized = "/" + normalized.TrimStart('/');
+        }
+
+        while (normalized.Length > 1 && normalized.EndsWith('/'))
+        {
+            normalized = normalized[..^1];
+        }
+
+        return normalized;
     }
 
     private static string ComputeSha256(string value)

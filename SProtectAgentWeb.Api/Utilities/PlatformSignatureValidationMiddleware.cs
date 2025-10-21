@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
@@ -29,13 +30,14 @@ public sealed class PlatformSignatureValidationMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (!ShouldValidate(context))
+        var integration = _config.PlatformIntegration ?? new PlatformIntegrationConfig();
+
+        if (!ShouldValidate(context, integration))
         {
             await _next(context);
             return;
         }
 
-        var integration = _config.PlatformIntegration ?? new PlatformIntegrationConfig();
         var sharedSecret = integration.SharedSecret?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(sharedSecret))
         {
@@ -114,10 +116,89 @@ public sealed class PlatformSignatureValidationMiddleware
         await _next(context);
     }
 
-    private static bool ShouldValidate(HttpContext context)
+    private static bool ShouldValidate(HttpContext context, PlatformIntegrationConfig integration)
     {
         var headers = context.Request.Headers;
-        return headers.ContainsKey("X-SProtect-Author-Account") || headers.ContainsKey("X-SProtect-Author-Password");
+        var hasPlatformHeaders = headers.ContainsKey("X-SProtect-Author-Account") || headers.ContainsKey("X-SProtect-Author-Password");
+        if (!hasPlatformHeaders)
+        {
+            return false;
+        }
+
+        var bypassPaths = integration.SignatureBypassPaths;
+        if (bypassPaths == null || bypassPaths.Count == 0)
+        {
+            return true;
+        }
+
+        var requestPath = context.Request.Path.HasValue ? context.Request.Path.Value! : "/";
+        return !IsBypassedPath(requestPath, bypassPaths);
+    }
+
+    private static bool IsBypassedPath(string actualPath, IList<string> bypassPaths)
+    {
+        for (var i = 0; i < bypassPaths.Count; i++)
+        {
+            if (MatchesPath(actualPath, bypassPaths[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool MatchesPath(string actualPath, string? pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return false;
+        }
+
+        var trimmedPattern = pattern.Trim();
+        var hasWildcard = trimmedPattern.EndsWith("/*", StringComparison.Ordinal);
+        if (hasWildcard)
+        {
+            trimmedPattern = trimmedPattern[..^2];
+        }
+
+        var normalizedPattern = NormalizePath(trimmedPattern);
+        var normalizedActual = NormalizePath(actualPath);
+
+        if (hasWildcard)
+        {
+            return normalizedActual.StartsWith(normalizedPattern, StringComparison.OrdinalIgnoreCase) &&
+                   (normalizedActual.Length == normalizedPattern.Length || normalizedActual[normalizedPattern.Length] == '/');
+        }
+
+        return string.Equals(normalizedActual, normalizedPattern, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "/";
+        }
+
+        var normalized = path.Trim();
+        var queryIndex = normalized.IndexOf('?', StringComparison.Ordinal);
+        if (queryIndex >= 0)
+        {
+            normalized = normalized[..queryIndex];
+        }
+
+        if (!normalized.StartsWith('/'))
+        {
+            normalized = "/" + normalized.TrimStart('/');
+        }
+
+        while (normalized.Length > 1 && normalized.EndsWith('/'))
+        {
+            normalized = normalized[..^1];
+        }
+
+        return normalized;
     }
 
     private static bool TryGetHeader(HttpContext context, string headerName, out string value)
