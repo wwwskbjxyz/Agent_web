@@ -2,6 +2,15 @@
 
 本仓库提供一套由 **SProtectPlatform.Api** 与 **SProtectAgentWeb.Api** 组成的 SaaS 平台：
 
+源代码全量部署适配教程： https://www.bilibili.com/video/BV1JqWQzpEMz/?share_source=copy_web&vd_source=35f5b062173ea51e9ba0c6dfdb68f31b
+
+演示站点：http://chen.roccloudiot.cn/
+
+演示小程序：
+![ccbc7bd6a14333598bb3d943ec81f6e2](https://github.com/user-attachments/assets/ba6c7097-738c-4f3b-9695-d2a2412cf673)
+
+
+
 | 模块 | 说明 | 默认端口 | 主要依赖 |
 | --- | --- | --- | --- |
 | `SProtectPlatform.Api` | 平台级后端，负责作者/代理账号体系、绑定关系、请求转发与微信公众号消息 | `5000`（可配置） | .NET 8、MySQL | 
@@ -23,9 +32,7 @@
 
 ### 2.1 配置并启动平台后端 `SProtectPlatform.Api`
 
-1. 创建数据库：
-   ```sql
-   CREATE DATABASE `sprotect_platform` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+1. 首次打开自动执行创建SQL
    ```
 2. 打开 `SProtectPlatform.Api/appsettings.json`，至少修改以下字段：
    - `MySql:ConnectionString`：填写数据库地址、账号密码等。
