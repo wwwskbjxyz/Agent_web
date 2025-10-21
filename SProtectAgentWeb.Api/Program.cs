@@ -184,6 +184,7 @@ app.UseSwaggerUI(c =>
 
 app.UseSession();
 app.UseMiddleware<RequestLoggingMiddleware>();
+app.UseMiddleware<PlatformSignatureValidationMiddleware>();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
