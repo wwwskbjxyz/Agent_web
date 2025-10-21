@@ -4,7 +4,9 @@
 
 源代码全量部署适配教程： https://www.bilibili.com/video/BV1JqWQzpEMz/?share_source=copy_web&vd_source=35f5b062173ea51e9ba0c6dfdb68f31b
 
-演示站点：http://chen.roccloudiot.cn/
+演示站点：http://chen.roccloudiot.cn
+作者账户admin 密码123456
+代理账户agent 密码123456
 
 演示小程序：
 ![ccbc7bd6a14333598bb3d943ec81f6e2](https://github.com/user-attachments/assets/ba6c7097-738c-4f3b-9695-d2a2412cf673)
