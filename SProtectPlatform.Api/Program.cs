@@ -87,34 +87,26 @@ builder.Services.AddAuthorization();
 builder.WebHost.ConfigureKestrel((context, options) =>
 {
     var httpsOptions = context.Configuration.GetSection("Https").Get<HttpsOptions>();
+    var httpPort = httpsOptions?.HttpPort ?? 5000;
+    options.ListenAnyIP(httpPort); // 始终绑定 HTTP
+
     if (httpsOptions?.Enabled == true)
     {
-        var httpPort = httpsOptions.HttpPort ?? 5000;
         var httpsPort = httpsOptions.HttpsPort ?? 5001;
-
-        if (string.IsNullOrWhiteSpace(httpsOptions.CertificatePath))
-        {
-            throw new InvalidOperationException("HTTPS is enabled but no certificate path was provided.");
-        }
-
         var certificatePath = httpsOptions.CertificatePath;
         if (!Path.IsPathRooted(certificatePath))
-        {
             certificatePath = Path.Combine(context.HostingEnvironment.ContentRootPath, certificatePath);
-        }
 
         if (!File.Exists(certificatePath))
-        {
             throw new InvalidOperationException($"HTTPS certificate not found at '{certificatePath}'.");
-        }
 
-        options.ListenAnyIP(httpPort);
         options.ListenAnyIP(httpsPort, listenOptions =>
         {
             listenOptions.UseHttps(certificatePath, httpsOptions.CertificatePassword);
         });
     }
 });
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
